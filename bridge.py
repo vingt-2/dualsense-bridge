@@ -50,7 +50,12 @@ class BluetoothDualSense:
                     dev.open_path(path)
                     self.dev, self.path = dev, path
                     # Reading calibration switches the controller to full 0x31 reports.
-                    self.get_feature(0x05, 41)
+                    # If it fails, Windows still lists a controller that is switched off.
+                    if self.get_feature(0x05, 41, quiet=True) is None:
+                        self.dev = None
+                        dev.close()
+                        time.sleep(1)
+                        continue
                     self.vibration_v2 = firmware_uses_vibration_v2(self.get_feature(0x20, 64))
                     print(f"[bt] DualSense connected (rumble {'v2' if self.vibration_v2 else 'v1'})")
                     if self.on_state:
@@ -113,7 +118,7 @@ class BluetoothDualSense:
             except OSError as e:
                 print(f"[bt] haptics write failed: {e}")
 
-    def get_feature(self, rid, size):
+    def get_feature(self, rid, size, quiet=False):
         """Returns the report in USB form (no CRC), or None."""
         if not self.dev:
             return None
@@ -121,7 +126,8 @@ class BluetoothDualSense:
             try:
                 data = bytes(self.dev.get_feature_report(rid, size))
             except OSError as e:
-                print(f"[bt] get feature 0x{rid:02x} failed: {e}")
+                if not quiet:
+                    print(f"[bt] get feature 0x{rid:02x} failed: {e}")
                 return None
         # BT feature reports carry a CRC32 (seed 0xA3) in their last 4 bytes; blank it.
         if len(data) >= 5 and _bt_crc(0xA3, data[:-4]) == data[-4:]:

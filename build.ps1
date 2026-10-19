@@ -1,10 +1,12 @@
 # Builds dist\DualSenseBridge.exe and the installer dist\DualSenseBridge-Setup-<version>.exe.
 # Needs Python 3.10+ and Inno Setup 6 (winget install JRSoftware.InnoSetup).
 param([string] $Version = "1.0.0")
-$ErrorActionPreference = 'Stop'
+# Exit codes are checked explicitly: pip and PyInstaller log to stderr, which
+# $ErrorActionPreference = 'Stop' would turn into errors when output is redirected.
 Set-Location $PSScriptRoot
 
-python -m pip install --quiet -r requirements.txt
+python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 python tests\test_usbip_device.py
 if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
 

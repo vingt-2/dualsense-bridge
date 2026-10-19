@@ -1,5 +1,8 @@
 # DualSense Bridge
 
+> **AI-assisted:** this project was written with [Claude](https://www.anthropic.com/claude) (Anthropic) in Claude Code.
+> The code is AI-written; it was tested by a human on real hardware and in games. Review it as you see fit.
+
 Use a **PS5 DualSense over Bluetooth** on Windows and have games treat it as a **wired** controller,
 including **HD haptics, adaptive triggers**, rumble, lightbar and LEDs.
 

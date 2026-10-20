@@ -118,7 +118,12 @@ class TrayApp:
             "HidHideCLI.exe", r"C:\Program Files\Nefarius Software Solutions\HidHide\x64")
         self.hide_enabled = self.hidhide is not None
         self.keep_audio = True
-        self.hidden_id = None
+        # Bluetooth controllers (HID instance ids) seen before; hidden at startup so a
+        # game that is already running never sees the controller when it reconnects.
+        self.known_ids = set(_load_settings().get("controller_ids", []))
+        self.hidden_ids = set()
+        self._hide_lock = threading.Lock()
+        bt.before_open = lambda path: self._hide_ids({_hid_instance_id(path)})
         self.port = None
         self.state = "waiting"
         self._startup = None
@@ -167,7 +172,6 @@ class TrayApp:
         with self._lock:
             if up:
                 self._set_state("connected")
-                self._hide()
                 defaults = self._audio_defaults()
                 if self._attach():
                     if defaults:
@@ -175,8 +179,10 @@ class TrayApp:
                     self._set_state("wired")
                     self.icon.notify("DualSense is now showing as a wired controller.", APP)
             else:
+                # The controller stays hidden while the bridge runs: un-hiding it here
+                # let a running game grab it on reconnect, and the game's setup
+                # (feature 0x08 over Bluetooth) knocked it off again, in a loop.
                 self._detach()
-                self._unhide()
                 self._set_state("waiting")
 
     def _attach(self):
@@ -219,18 +225,31 @@ class TrayApp:
             print(f"[audio] could not restore default devices: {e}")
 
     # -- HidHide --------------------------------------------------------------
-    def _hide(self):
-        if not (self.hide_enabled and self.hidhide and self.bt.path):
+    def _hide_ids(self, ids):
+        """Hide these Bluetooth controllers from everything but the bridge."""
+        if not (self.hide_enabled and self.hidhide):
             return
-        self.hidden_id = _hid_instance_id(self.bt.path)
-        _run(self.hidhide, "--app-reg", sys.executable)
-        _run(self.hidhide, "--dev-hide", self.hidden_id)
-        _run(self.hidhide, "--cloak-on")
+        with self._hide_lock:
+            new = set(ids) - self.hidden_ids
+            if not new:
+                return
+            if not self.hidden_ids:
+                _run(self.hidhide, "--app-reg", sys.executable)
+            for instance_id in new:
+                _run(self.hidhide, "--dev-hide", instance_id)
+            _run(self.hidhide, "--cloak-on")
+            self.hidden_ids |= new
+            if not new <= self.known_ids:
+                self.known_ids |= new
+                _save_settings({"controller_ids": sorted(self.known_ids)})
 
-    def _unhide(self):
-        if self.hidhide and self.hidden_id:
-            _run(self.hidhide, "--dev-unhide", self.hidden_id)
-            self.hidden_id = None
+    def _unhide_all(self):
+        if not self.hidhide:
+            return
+        with self._hide_lock:
+            for instance_id in self.hidden_ids:
+                _run(self.hidhide, "--dev-unhide", instance_id)
+            self.hidden_ids.clear()
 
     def _depth_setter(self, depth):
         def set_depth():
@@ -244,11 +263,11 @@ class TrayApp:
 
     def _toggle_hide(self):
         self.hide_enabled = not self.hide_enabled
-        with self._lock:
-            if self.hide_enabled and self.bt.dev:
-                self._hide()
-            elif not self.hide_enabled:
-                self._unhide()
+        if self.hide_enabled:
+            current = {_hid_instance_id(self.bt.path)} if self.bt.path else set()
+            self._hide_ids(self.known_ids | current)
+        else:
+            self._unhide_all()
 
     # -- start with Windows ---------------------------------------------------
     def _startup_enabled(self):
@@ -271,7 +290,7 @@ class TrayApp:
     def _quit(self):
         with self._lock:
             self._detach()
-            self._unhide()
+        self._unhide_all()
         self.icon.stop()
         os._exit(0)
 
@@ -289,6 +308,7 @@ class TrayApp:
             icon.visible = True
             if self.usbip is None:
                 icon.notify("usbip-win2 is required – right-click the tray icon to install it.", APP)
+            self._hide_ids(self.known_ids)   # before the controller can (re)connect
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             threading.Thread(target=self.bt.run, daemon=True).start()
             threading.Thread(target=self._wait_for_quit_request, daemon=True).start()

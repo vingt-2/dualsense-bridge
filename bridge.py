@@ -28,6 +28,7 @@ class BluetoothDualSense:
         self.vibration_v2 = True
         self.on_input = None
         self.on_state = None  # called with True/False on connect/disconnect
+        self.before_open = None  # called with the HID path before the controller is opened
         self._seq = 0
         self._haptics_counter = 0
         self._haptics_last = 0.0
@@ -45,6 +46,8 @@ class BluetoothDualSense:
         while True:
             path = self._find()
             if path:
+                if self.before_open:
+                    self.before_open(path)
                 try:
                     dev = hid.device()
                     dev.open_path(path)

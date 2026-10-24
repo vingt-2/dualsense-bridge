@@ -134,6 +134,8 @@ class TrayApp:
         self.icon = pystray.Icon(TASK, ICONS["waiting"], APP, menu=pystray.Menu(
             pystray.MenuItem(lambda _: self._status_text(), None, enabled=False),
             pystray.MenuItem("Connection quality…", lambda: quality_window.show(self.bt)),
+            pystray.MenuItem("Turn off controller", self._power_off,
+                             enabled=lambda _: self.state != "waiting"),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Hide Bluetooth controller from games", self._toggle_hide,
                              checked=lambda _: self.hide_enabled,
@@ -209,6 +211,10 @@ class TrayApp:
         else:
             _run(self.usbip, "detach", "--all")
         self.port = None
+
+    def _power_off(self):
+        if not self.bt.power_off():
+            self.icon.notify("Could not turn off the controller – see the log.", APP)
 
     # -- default audio devices --------------------------------------------------
     def _audio_defaults(self):

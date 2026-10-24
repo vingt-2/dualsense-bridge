@@ -16,6 +16,7 @@ from link_stats import LinkStats
 from usbip_server import UsbIpServer
 
 BT_HID_GUID = b"00001124-0000-1000-8000-00805f9b34fb"
+IOCTL_BTH_DISCONNECT_DEVICE = 0x41000C
 
 # Windows' default timer ticks every 15.6 ms, which makes time.sleep() far too coarse
 # for pacing audio and haptics (a 5 ms sleep takes 15.6 ms). Ask for 1 ms.
@@ -125,6 +126,37 @@ class BluetoothDualSense:
                 self.dev.write(pkt)
             except OSError as e:
                 print(f"[bt] haptics write failed: {e}")
+
+    def power_off(self):
+        """Turn the controller off by dropping its Bluetooth link (as DS4Windows does):
+        the DualSense powers down when the PC disconnects it."""
+        info = self.get_feature(0x09, 20)   # pairing info: controller MAC at bytes 1-6, LSB first
+        if not info:
+            return False
+        addr = ctypes.c_uint64(int.from_bytes(info[1:7], "little"))
+        bt_api = ctypes.WinDLL("bthprops.cpl")
+        k32 = ctypes.windll.kernel32
+        bt_api.BluetoothFindFirstRadio.restype = ctypes.c_void_p
+        params = ctypes.c_uint32(4)   # BLUETOOTH_FIND_RADIO_PARAMS.dwSize
+        radio = ctypes.c_void_p()
+        find = bt_api.BluetoothFindFirstRadio(ctypes.byref(params), ctypes.byref(radio))
+        if not find:
+            print("[bt] power off: no Bluetooth radio found")
+            return False
+        done = False
+        try:
+            while True:
+                returned = ctypes.c_uint32()
+                if k32.DeviceIoControl(radio, IOCTL_BTH_DISCONNECT_DEVICE, ctypes.byref(addr), 8,
+                                       None, 0, ctypes.byref(returned), None):
+                    done = True
+                k32.CloseHandle(radio)
+                if done or not bt_api.BluetoothFindNextRadio(ctypes.c_void_p(find), ctypes.byref(radio)):
+                    break
+        finally:
+            bt_api.BluetoothFindRadioClose(ctypes.c_void_p(find))
+        print(f"[bt] power off {'sent' if done else 'failed'}")
+        return done
 
     def get_feature(self, rid, size, quiet=False):
         """Returns the report in USB form (no CRC), or None."""

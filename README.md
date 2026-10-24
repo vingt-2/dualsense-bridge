@@ -52,6 +52,7 @@ Right-click the icon for:
   (gaps over 10 ms), the longest gap, and a chart of the last minute. Use it to find a good spot
   for the controller and the Bluetooth adapter: press *Reset* after each change and give it 30 seconds.
   Gaps longer than the haptics delay can make haptics stutter.
+- **Turn off controller**: powers the controller down (press PS to turn it back on).
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;
   *Low* or *Lowest* feel more immediate but may stutter when the PC or Bluetooth is busy.
 - **Hide Bluetooth controller from games** (HidHide), on by default.

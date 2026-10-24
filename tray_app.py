@@ -22,6 +22,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 import audio_default
+import quality_window
 from bridge import BluetoothDualSense
 from dualsense_usb import WiredDualSense
 from usbip_server import UsbIpServer
@@ -132,6 +133,7 @@ class TrayApp:
 
         self.icon = pystray.Icon(TASK, ICONS["waiting"], APP, menu=pystray.Menu(
             pystray.MenuItem(lambda _: self._status_text(), None, enabled=False),
+            pystray.MenuItem("Connection quality…", lambda: quality_window.show(self.bt)),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Hide Bluetooth controller from games", self._toggle_hide,
                              checked=lambda _: self.hide_enabled,

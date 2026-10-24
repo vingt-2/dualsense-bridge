@@ -48,6 +48,10 @@ the virtual controller and to configure HidHide). The icon shows the state:
 
 Right-click the icon for:
 
+- **Connection quality…**: a live view of the Bluetooth link: reports per second, dropouts
+  (gaps over 10 ms), the longest gap, and a chart of the last minute. Use it to find a good spot
+  for the controller and the Bluetooth adapter: press *Reset* after each change and give it 30 seconds.
+  Gaps longer than the haptics delay can make haptics stutter.
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;
   *Low* or *Lowest* feel more immediate but may stutter when the PC or Bluetooth is busy.
 - **Hide Bluetooth controller from games** (HidHide), on by default.

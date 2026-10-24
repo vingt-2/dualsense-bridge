@@ -12,6 +12,7 @@ import hid
 from dualsense_usb import (BT_REPORT_SIZE, VID, PID, WiredDualSense, bt_input_to_usb,
                            firmware_uses_vibration_v2, usb_output_to_bt, _bt_crc)
 from haptics import DEFAULT_DEPTH, bt_haptics_report
+from link_stats import LinkStats
 from usbip_server import UsbIpServer
 
 BT_HID_GUID = b"00001124-0000-1000-8000-00805f9b34fb"
@@ -34,6 +35,7 @@ class BluetoothDualSense:
         self._haptics_last = 0.0
         self.haptics_depth = DEFAULT_DEPTH   # controller buffer, ~ms (see haptics.py)
         self._io = threading.Lock()  # serialises writes / feature reports
+        self.link = LinkStats()      # Bluetooth link quality, for the tray's quality window
 
     # -- connection -------------------------------------------------------
     def _find(self):
@@ -61,6 +63,7 @@ class BluetoothDualSense:
                         continue
                     self.vibration_v2 = firmware_uses_vibration_v2(self.get_feature(0x20, 64))
                     print(f"[bt] DualSense connected (rumble {'v2' if self.vibration_v2 else 'v1'})")
+                    self.link.connection(True)
                     if self.on_state:
                         self.on_state(True)
                     return
@@ -78,6 +81,7 @@ class BluetoothDualSense:
                     if not r:
                         continue
                     if r[0] == 0x31 and len(r) >= 65:
+                        self.link.input_report()
                         if self.on_input:
                             self.on_input(bt_input_to_usb(r))
                     elif r[0] == 0x01:
@@ -87,6 +91,7 @@ class BluetoothDualSense:
             except OSError as e:
                 print(f"[bt] disconnected: {e}")
                 self.dev = None
+                self.link.connection(False)
                 if self.on_state:
                     self.on_state(False)
 

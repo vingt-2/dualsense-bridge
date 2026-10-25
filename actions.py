@@ -174,10 +174,10 @@ class HideCursor(Action):
 
     def run(self, params):
         try:
-            hidden = cursor.toggle(params.get("park", True), params.get("show_on_move", True))
+            cursor.toggle(params.get("park", True), params.get("show_on_move", True))
         except OSError as e:
             raise ActionError(f"Could not hide the cursor: {e}")
-        return "Mouse cursor hidden" if hidden else "Mouse cursor shown"
+        return None   # the cursor vanishing is feedback enough
 
 
 ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab(), WindowSwitcher(), HideCursor()]}

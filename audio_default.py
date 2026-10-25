@@ -131,15 +131,18 @@ def set_default(endpoint_id, role):
         _release(pc)
 
 
-def guard_defaults(before, seconds=15):
+def guard_defaults(before, seconds=15, playback_free=None):
     """After the virtual device is attached, put back any default that Windows
     switched away from `before`. Runs for `seconds`, since the sound device
-    shows up a little after the USB attach."""
+    shows up a little after the USB attach. Once the `playback_free` event is set,
+    playback defaults are left alone (the bridge chose one on purpose)."""
     restored = set()
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         now = get_defaults()
         for key, original in before.items():
+            if key[0] == E_RENDER and playback_free and playback_free.is_set():
+                continue
             if now.get(key) != original:
                 set_default(original, key[1])
                 if key not in restored:

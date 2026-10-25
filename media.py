@@ -153,6 +153,10 @@ class SpeakerStream:
             self.on_start()
         self.wake()
 
+    @property
+    def active(self):
+        return self._active
+
     def ready(self):
         with self._lock:
             need = (1 if self._started else self.PREBUFFER) * SPEAKER_IN * 2

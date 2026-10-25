@@ -19,6 +19,7 @@ from usbip_server import UsbIpServer
 
 BT_HID_GUID = b"00001124-0000-1000-8000-00805f9b34fb"
 IOCTL_BTH_DISCONNECT_DEVICE = 0x41000C
+HEADSET_STATUS = 55   # input report byte holding the headphone-jack bit
 
 # Windows' default timer ticks every 15.6 ms, which makes time.sleep() far too coarse
 # for pacing audio and haptics (a 5 ms sleep takes 15.6 ms). Ask for 1 ms.
@@ -36,7 +37,8 @@ class BluetoothDualSense:
         self.on_buttons = None   # called with the 3 button bytes whenever they change
         self.on_mic = None       # called with (counter, Opus bytes) for each mic packet
         self.mic_enabled = False
-        self.headset = False     # play speaker audio on the headphone jack
+        self.headset = False     # headphones are plugged into the controller's jack
+        self.on_headset = None   # called with True/False when headphones are plugged/unplugged
         # 0x39 (two Opus frames per report, as a PS5 sends) rides over Bluetooth stalls far
         # better than 0x36 (one): ~3 dropouts in 5 s against ~20, same link.
         self.speaker_format = 0x39
@@ -102,6 +104,13 @@ class BluetoothDualSense:
                                 self.on_mic(r[2], bytes(r[3:74]))
                             continue
                         self.link.input_report()
+                        # status byte 1, bit 0: headphones plugged in (Linux hid-playstation)
+                        headset = bool(r[HEADSET_STATUS] & 0x01)
+                        if headset != self.headset:
+                            self.headset = headset
+                            print(f"[bt] headphones {'plugged in' if headset else 'unplugged'}")
+                            if self.on_headset:
+                                self.on_headset(headset)
                         if self.on_input:
                             self.on_input(bt_input_to_usb(r))
                         if self.on_buttons and r[9:12] != buttons:

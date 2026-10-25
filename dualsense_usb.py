@@ -196,6 +196,8 @@ class WiredDualSense:
         self.haptics = HapticsConverter(self.media.put)
         self.mic = MicStream()
         bt.on_mic = self.mic.packet
+        bt.on_headset = self._headset_changed
+        self.on_headset = None          # also told when headphones are plugged/unplugged
         self.audio = AudioFunction(on_haptics=self.haptics.feed, on_speaker=self.speaker.feed,
                                    mic=self.mic)
         bt.on_input = self._on_bt_input
@@ -208,7 +210,16 @@ class WiredDualSense:
         print(f"[audio] speaker stream stopped: {self.speaker.summary()}; Bluetooth meanwhile: "
               f"{dropouts} input gaps over 10 ms, longest {worst:.0f} ms")
 
+    def _headset_changed(self, headset):
+        """Headphones plugged in: stereo to the jack; unplugged: mono to the speaker."""
+        self.speaker.mono = not headset
+        if self.speaker.active:
+            self.bt.write_usb_output(speaker_setup_output(headset))
+        if self.on_headset:
+            self.on_headset(headset)
+
     def _speaker_started(self):
+        self.speaker.mono = not self.bt.headset
         _, total, _ = self.bt.link.snapshot()
         self._speaker_dropouts, self._speaker_since = total.dropouts, time.perf_counter()
         self._load_debug()

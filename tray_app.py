@@ -138,6 +138,12 @@ class TrayApp:
             "HidHideCLI.exe", r"C:\Program Files\Nefarius Software Solutions\HidHide\x64")
         self.hide_enabled = self.hidhide is not None
         self.keep_audio = True
+        # Off by default, like a PS5: only what's sent to the controller plays there.
+        self.headset_output = _load_settings().get("headset_default_output", False)
+        self._headset_saved = None         # (render defaults before, controller endpoint)
+        self._playback_chosen = threading.Event()
+        server.device.on_headset = lambda plugged: threading.Thread(
+            target=self._on_headset, args=(plugged,), daemon=True).start()
         # Bluetooth controllers (HID instance ids) seen before; hidden at startup so a
         # game that is already running never sees the controller when it reconnects.
         self.known_ids = set(_load_settings().get("controller_ids", []))
@@ -178,6 +184,8 @@ class TrayApp:
                 for label, depth in HAPTICS_DEPTHS])),
             pystray.MenuItem("Keep my default speaker and mic", self._toggle_keep_audio,
                              checked=lambda _: self.keep_audio),
+            pystray.MenuItem("Use controller headphones for all PC audio", self._toggle_headset_output,
+                             checked=lambda _: self.headset_output),
             pystray.MenuItem("Start with Windows", self._toggle_startup,
                              checked=lambda _: self._startup_enabled()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
@@ -211,6 +219,7 @@ class TrayApp:
                 defaults = self._audio_defaults()
                 if self._attach():
                     if defaults:
+                        self._playback_chosen.clear()
                         threading.Thread(target=self._guard_audio, args=(defaults,), daemon=True).start()
                     self._set_state("wired")
                     self.icon.notify("DualSense is now showing as a wired controller.", APP)
@@ -221,6 +230,7 @@ class TrayApp:
                 self.shortcut_engine.update(frozenset())   # let go of any held shortcut
                 self._detach()
                 self._set_state("waiting")
+                threading.Thread(target=self._restore_headset_output, daemon=True).start()
 
     def _attach(self):
         if self.usbip is None:
@@ -286,9 +296,72 @@ class TrayApp:
 
     def _guard_audio(self, defaults):
         try:
-            audio_default.guard_defaults(defaults)
+            audio_default.guard_defaults(defaults, playback_free=self._playback_chosen)
         except OSError as e:
             print(f"[audio] could not restore default devices: {e}")
+
+    # -- controller headphones as the default output ------------------------------
+    def _toggle_headset_output(self):
+        self.headset_output = not self.headset_output
+        _save_settings({"headset_default_output": self.headset_output})
+        if self.headset_output:
+            threading.Thread(target=self._on_headset, args=(self.bt.headset,), daemon=True).start()
+        else:
+            threading.Thread(target=self._restore_headset_output, daemon=True).start()
+
+    def _controller_output(self, wait=0):
+        """The virtual controller's playback endpoint id; it shows up a few seconds after
+        the controller connects, so this can wait for it."""
+        end = time.monotonic() + wait
+        while True:
+            for endpoint_id, name in audio_default.list_outputs():
+                if "DualSense Wireless Controller" in name:
+                    return endpoint_id
+            if time.monotonic() >= end:
+                return None
+            time.sleep(0.5)
+
+    def _on_headset(self, plugged):
+        if not plugged:
+            self._restore_headset_output()
+            return
+        if not self.headset_output or self._headset_saved:
+            return
+        try:
+            endpoint = self._controller_output(wait=20)
+            if endpoint is None:
+                print("[audio] controller headphones: no controller sound device")
+                return
+            current = audio_default.get_defaults()
+            saved = {role: current[(audio_default.E_RENDER, role)] for role in audio_default.ROLES
+                     if (audio_default.E_RENDER, role) in current}
+            self._playback_chosen.set()    # the attach guard must not switch it back
+            self._headset_saved = (saved, endpoint)
+            audio_default.set_output(endpoint)
+        except OSError as e:
+            print(f"[audio] could not switch to the controller headphones: {e}")
+            return
+        print("[audio] headphones plugged in: PC audio -> controller")
+        self.icon.notify("Headphones plugged into the controller: PC audio plays there.", APP)
+
+    def _restore_headset_output(self):
+        """Put back the default output from before the headphones were plugged in, unless
+        the user picked another one meanwhile."""
+        if not self._headset_saved:
+            return
+        (saved, endpoint), self._headset_saved = self._headset_saved, None
+        try:
+            outputs = dict(audio_default.list_outputs())
+            current = audio_default.get_defaults().get((audio_default.E_RENDER, 0))
+            if current != endpoint and endpoint in outputs:
+                return   # the user chose another output while the headphones were in
+            for role, endpoint_id in saved.items():
+                if endpoint_id in outputs:
+                    audio_default.set_default(endpoint_id, role)
+        except OSError as e:
+            print(f"[audio] could not restore the default output: {e}")
+            return
+        print("[audio] headphones unplugged: PC audio back to the previous output")
 
     # -- HidHide --------------------------------------------------------------
     def _hide_ids(self, ids):
@@ -357,6 +430,7 @@ class TrayApp:
         with self._lock:
             self._detach()
         self._unhide_all()
+        self._restore_headset_output()
         if cursor.is_hidden():
             cursor.restore()
         keyboard.release_all()

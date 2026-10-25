@@ -19,7 +19,7 @@ virtual USB DualSense that looks like the real wired one, so those games enable 
 | HD haptics (e.g. Assassin's Creed Mirage) | ✅ ~50 ms delay by default, adjustable |
 | Controller speaker | ✅ |
 | Controller microphone | ✅ |
-| Headphone jack | ❌ not yet |
+| Headphone jack | ✅ (stereo; the speaker goes quiet while headphones are in) |
 
 Tested with Assassin's Creed Mirage on Windows 11. Not affiliated with or endorsed by Sony.
 
@@ -92,6 +92,10 @@ Right-click the icon for:
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;
   *Low* or *Lowest* feel more immediate but may stutter when the PC or Bluetooth is busy.
 - **Hide Bluetooth controller from games** (HidHide), on by default.
+- **Use controller headphones for all PC audio** (off by default): while headphones are plugged
+  into the controller, make it Windows' default playback device, and switch back when they're
+  unplugged. Off, it works like a PS5: only sound sent to the controller (e.g. a game's controller
+  speaker effects) plays there.
 - **Keep my default speaker and mic**: the virtual controller adds a "DualSense Wireless Controller"
   sound device, and Windows tends to make new sound devices the default. This puts yours back.
 - **Start with Windows**, **Open log**, **Quit**.
@@ -156,6 +160,8 @@ These cost some debugging and are documented here in case they help others:
   (one): measured with the controller's mic listening to its own speaker, ~3 dropouts per 5 s against
   ~20 on the same link. The last byte of its config packet is the speaker buffer: the PS5's `0x28`
   still dropped out a little, `0x3C` was clean for ~15 ms more delay.
+- **Headphone jack:** input report byte 55 (Bluetooth), bit 0, is set while headphones are plugged in;
+  audio then goes as Opus packet `0x16` (stereo, the jack) instead of `0x15` (the speaker).
 - Mic packets arrive in the same input report id as the gamepad state, so they must be filtered out
   or they read as stick and button input.
 - **Rumble on newer firmware** (update version ≥ `0x0215`) needs `valid_flag2` bit 2 plus

@@ -98,6 +98,10 @@ Right-click the icon for:
   controller (e.g. a game's controller speaker effects).
 - **Keep my default speaker and mic**: the virtual controller adds a "DualSense Wireless Controller"
   sound device, and Windows tends to make new sound devices the default. This puts yours back.
+- **Updates**: DualSense Bridge checks GitHub for a new release a minute after it starts and then
+  once a day, and tells you once per new version. *Update to x.y.z…* then appears at the top of the
+  menu: it downloads the new installer, which closes the app, installs and starts the new version.
+  Turn off *Check for updates automatically* to stop the checks; *Check now* checks right away.
 - **Start with Windows**, **Open log**, **Quit**.
 
 ### Troubleshooting
@@ -194,6 +198,7 @@ To run from source instead: `pip install -r requirements.txt`, install usbip-win
 | `opus.py` | Minimal libopus binding |
 | `usbip_server.py` | Minimal USB/IP server |
 | `audio_default.py` | Restores Windows' default sound devices |
+| `updater.py` | Update check against the latest GitHub release, download and install |
 | `installer/` | Inno Setup script and the dependency downloader |
 
 ## Credits

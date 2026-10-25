@@ -12,6 +12,9 @@ if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
 python tests\test_shortcuts.py
 if ($LASTEXITCODE -ne 0) { throw "shortcut self-test failed" }
 
+# The version the app reports and compares with GitHub releases (see updater.py)
+Set-Content -Encoding ascii _build_version.py "VERSION = `"$Version`""
+
 # libopus for the controller's Bluetooth speaker and mic audio (see opus.py)
 $opusDll = python -c "import importlib.util, os; print(os.path.join(importlib.util.find_spec('pyogg').submodule_search_locations[0], 'opus.dll'))"
 if (-not (Test-Path $opusDll)) { throw "opus.dll not found (pip install PyOgg)" }

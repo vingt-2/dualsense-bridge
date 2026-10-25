@@ -37,8 +37,6 @@ class AudioFunction:
         self._clock = {}                      # ep -> time the next packet may complete
         self._n = itertools.count()
         self._server = None
-        self._haptic_peak = 0
-        self._last_report = 0.0
         threading.Thread(target=self._timer, daemon=True).start()
 
     def attached(self, server):
@@ -142,13 +140,5 @@ class AudioFunction:
             speaker[1::2] = samples[1::4]
             self.on_speaker(speaker, self.gain(SPEAKER_UNIT))
         frames = list(zip(samples[2::4], samples[3::4]))  # channels 3 and 4
-        if frames:
-            peak = max(max(abs(a), abs(b)) for a, b in frames)
-            self._haptic_peak = max(self._haptic_peak, peak)
-            if self.on_haptics:
-                self.on_haptics(frames)
-        now = time.monotonic()
-        if now - self._last_report > 5:
-            if self._haptic_peak > 0:
-                print(f"[audio] game is sending haptics (peak {self._haptic_peak})")
-            self._haptic_peak, self._last_report = 0, now
+        if frames and self.on_haptics:
+            self.on_haptics(frames)

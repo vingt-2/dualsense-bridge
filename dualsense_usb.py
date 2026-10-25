@@ -207,8 +207,10 @@ class WiredDualSense:
         recent = [x for x in history if x.start >= self._speaker_since]
         worst = max((x.worst for x in recent), default=0) * 1000
         dropouts = total.dropouts - self._speaker_dropouts
-        print(f"[audio] speaker stream stopped: {self.speaker.summary()}; Bluetooth meanwhile: "
-              f"{dropouts} input gaps over 10 ms, longest {worst:.0f} ms")
+        st = self.speaker.stats
+        if st.get("underruns") or st.get("dropped_ms") or st.get("late"):   # only log trouble
+            print(f"[audio] speaker stream had gaps: {self.speaker.summary()}; Bluetooth "
+                  f"meanwhile: {dropouts} input gaps over 10 ms, longest {worst:.0f} ms")
 
     def _headset_changed(self, headset):
         """Headphones plugged in: stereo to the jack; unplugged: mono to the speaker."""
@@ -223,8 +225,6 @@ class WiredDualSense:
         _, total, _ = self.bt.link.snapshot()
         self._speaker_dropouts, self._speaker_since = total.dropouts, time.perf_counter()
         self._load_debug()
-        print(f"[audio] speaker stream started ({'headphones' if self.bt.headset else 'speaker'}, "
-              f"report 0x{self.bt.speaker_format:02x})")
         self.bt.write_usb_output(speaker_setup_output(self.bt.headset))
 
     def _load_debug(self):
@@ -329,7 +329,6 @@ class WiredDualSense:
             if req == 0x0B:  # SET_INTERFACE
                 self._log_once(("alt", index, value), f"host selected interface {index} alt {value}")
                 if index == 2:   # the mic stream: Windows opens it when an app records
-                    print(f"[usb] mic interface alt {value} ({self.mic.summary()})")
                     self.mic.reset()
                     self.bt.set_mic(value == 1)
             return 0, b""  # CLEAR/SET_FEATURE, SET_CONFIGURATION, SET_INTERFACE

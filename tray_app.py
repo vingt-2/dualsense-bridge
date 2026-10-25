@@ -26,6 +26,7 @@ import cursor
 import keyboard
 import quality_window
 import shortcut_window
+import updater
 from bridge import BluetoothDualSense
 from dualsense_usb import WiredDualSense
 from actions import ACTIONS, ActionError
@@ -138,6 +139,9 @@ class TrayApp:
             "HidHideCLI.exe", r"C:\Program Files\Nefarius Software Solutions\HidHide\x64")
         self.hide_enabled = self.hidhide is not None
         self.keep_audio = True
+        self.check_updates = _load_settings().get("check_updates", True)
+        self.update = None                 # updater.Release newer than this build, if any
+        self._updating = False
         # Like a PS5: headphones in the controller get all audio (its speaker only plays
         # what's sent to the controller, e.g. a game's speaker effects).
         self.headset_output = _load_settings().get("headset_default_output", True)
@@ -171,6 +175,9 @@ class TrayApp:
 
         self.icon = pystray.Icon(TASK, ICONS["waiting"], APP, menu=pystray.Menu(
             pystray.MenuItem(lambda _: self._status_text(), None, enabled=False),
+            pystray.MenuItem(lambda _: f"Update to {self.update.version}…" if self.update else "",
+                             self._install_update, visible=lambda _: self.update is not None,
+                             enabled=lambda _: not self._updating),
             pystray.MenuItem("Connection quality…", lambda: quality_window.show(self.bt)),
             pystray.MenuItem("Turn off controller", self._power_off,
                              enabled=lambda _: self.state != "waiting"),
@@ -190,6 +197,13 @@ class TrayApp:
             pystray.MenuItem("Start with Windows", self._toggle_startup,
                              checked=lambda _: self._startup_enabled()),
             pystray.MenuItem("Open log", lambda: os.startfile(LOG_PATH)),
+            pystray.MenuItem("Updates", pystray.Menu(
+                pystray.MenuItem("Check for updates automatically", self._toggle_check_updates,
+                                 checked=lambda _: self.check_updates),
+                pystray.MenuItem("Check now", lambda: threading.Thread(
+                    target=self._check_for_update, args=(True,), daemon=True).start()),
+                pystray.MenuItem(lambda _: f"Version {updater.VERSION or 'from source'}", None,
+                                 enabled=False))),
             pystray.MenuItem("Install usbip-win2…", lambda: webbrowser.open(USBIP_URL),
                              visible=lambda _: self.usbip is None),
             pystray.MenuItem("Install HidHide…", lambda: webbrowser.open(HIDHIDE_URL),
@@ -281,7 +295,7 @@ class TrayApp:
             print(f"[shortcut] {name}: {e}")
             self.icon.notify(str(e), APP)
             return
-        print(f"[shortcut] {name}: {message}")
+        print(f"[shortcut] {name}: {message or action.name}")
         if self.shortcut_notify and message:
             self.icon.notify(message, APP)
 
@@ -409,10 +423,77 @@ class TrayApp:
         else:
             self._unhide_all()
 
+    # -- updates ------------------------------------------------------------------
+    UPDATE_FIRST_CHECK = 60          # s after startup
+    UPDATE_INTERVAL = 24 * 3600
+
+    def _update_loop(self):
+        time.sleep(self.UPDATE_FIRST_CHECK)
+        while True:
+            if self.check_updates:
+                self._check_for_update()
+            time.sleep(self.UPDATE_INTERVAL)
+
+    def _toggle_check_updates(self):
+        self.check_updates = not self.check_updates
+        _save_settings({"check_updates": self.check_updates})
+
+    def _check_for_update(self, manual=False):
+        if updater.VERSION is None:
+            if manual:
+                self.icon.notify("Running from source: no version to compare.", APP)
+            return
+        try:
+            release = updater.latest()
+        except (OSError, ValueError) as e:
+            print(f"[update] check failed: {e}")
+            if manual:
+                self.icon.notify("Could not check for updates – see the log.", APP)
+            return
+        if not updater.newer(release):
+            print(f"[update] up to date ({updater.VERSION})")
+            if manual:
+                self.icon.notify(f"DualSense Bridge {updater.VERSION} is up to date.", APP)
+            return
+        self.update = release
+        self.icon.update_menu()
+        print(f"[update] {release.version} is available ({release.page})")
+        # Tell once per version (or whenever asked), not at every daily check.
+        if manual or _load_settings().get("update_notified") != release.version:
+            _save_settings({"update_notified": release.version})
+            self.icon.notify(f"DualSense Bridge {release.version} is available. "
+                             "Right-click the tray icon to update.", APP)
+
+    def _install_update(self):
+        if self._updating or self.update is None:
+            return
+        self._updating = True
+        self.icon.update_menu()
+        threading.Thread(target=self._download_and_install, args=(self.update,), daemon=True).start()
+
+    def _download_and_install(self, release):
+        self.icon.notify(f"Downloading DualSense Bridge {release.version}…", APP)
+        try:
+            path = updater.download(release)
+            print(f"[update] installing {release.version} from {path}")
+            updater.install(path)      # the installer quits this app and starts the new one
+        except OSError as e:
+            print(f"[update] failed: {e}")
+            self.icon.notify("The update failed – see the log. You can also download it "
+                             "from GitHub.", APP)
+            webbrowser.open(release.page)
+            self._updating = False
+            self.icon.update_menu()
+
     # -- start with Windows ---------------------------------------------------
     def _startup_enabled(self):
         if self._startup is None:
-            self._startup = _run("schtasks", "/query", "/tn", TASK)[0] == 0
+            # Not logged: it runs at every start and only answers whether the task exists.
+            try:
+                self._startup = subprocess.run(["schtasks", "/query", "/tn", TASK], capture_output=True,
+                                               timeout=30, creationflags=NO_WINDOW).returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                self._startup = False
         return self._startup
 
     def _toggle_startup(self):
@@ -457,6 +538,7 @@ class TrayApp:
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             threading.Thread(target=self.bt.run, daemon=True).start()
             threading.Thread(target=self._wait_for_quit_request, daemon=True).start()
+            threading.Thread(target=self._update_loop, daemon=True).start()
 
         self.icon.run(setup=setup)
 

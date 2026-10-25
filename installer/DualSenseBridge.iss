@@ -57,6 +57,8 @@ Filename: "schtasks.exe"; \
   Flags: runhidden; Tasks: startup
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; \
   Flags: postinstall nowait shellexec skipifsilent
+; The app's own updater installs silently with /LAUNCH=1: start the new version afterwards.
+Filename: "{app}\{#AppExe}"; Flags: nowait shellexec; Check: LaunchAfterUpdate
 
 [UninstallRun]
 ; Quit cleanly first: the app detaches the virtual controller and un-hides the
@@ -67,6 +69,11 @@ Filename: "schtasks.exe"; Parameters: "/delete /tn {#TaskName} /f"; Flags: runhi
 [Code]
 var
   InstalledHidHideNow: Boolean;
+
+function LaunchAfterUpdate: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:LAUNCH|0}') = '1');
+end;
 
 function UsbipInstalled: Boolean;
 begin

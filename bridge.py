@@ -175,7 +175,7 @@ class BluetoothDualSense:
 
     def set_mic(self, on):
         """Start or stop the controller streaming its microphone back."""
-        self.mic_enabled = on
+        changed, self.mic_enabled = on != self.mic_enabled, on
         if not self.dev:
             return
         with self._io:
@@ -183,7 +183,8 @@ class BluetoothDualSense:
                 self.dev.write(audio_control_report(self._haptics_counter, on))
             except OSError as e:
                 print(f"[bt] mic control write failed: {e}")
-        print(f"[bt] microphone {'on' if on else 'off'}")
+        if changed:
+            print(f"[bt] microphone {'on' if on else 'off'}")
 
     def power_off(self):
         """Turn the controller off by dropping its Bluetooth link (as DS4Windows does):

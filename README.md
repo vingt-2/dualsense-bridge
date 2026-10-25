@@ -92,7 +92,7 @@ Right-click the icon for:
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;
   *Low* or *Lowest* feel more immediate but may stutter when the PC or Bluetooth is busy.
 - **Hide Bluetooth controller from games** (HidHide), on by default.
-- **Use controller headphones for all PC audio** (on by default, like a PS5): while headphones are
+- **Route all PC audio to the controller's headphone jack when plugged in** (on by default, like a PS5): while headphones are
   plugged into the controller, make it Windows' default playback device, and switch back when
   they're unplugged. The controller's speaker, like on a PS5, only plays sound sent to the
   controller (e.g. a game's controller speaker effects).

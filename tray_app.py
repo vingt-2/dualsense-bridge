@@ -138,8 +138,9 @@ class TrayApp:
             "HidHideCLI.exe", r"C:\Program Files\Nefarius Software Solutions\HidHide\x64")
         self.hide_enabled = self.hidhide is not None
         self.keep_audio = True
-        # Off by default, like a PS5: only what's sent to the controller plays there.
-        self.headset_output = _load_settings().get("headset_default_output", False)
+        # Like a PS5: headphones in the controller get all audio (its speaker only plays
+        # what's sent to the controller, e.g. a game's speaker effects).
+        self.headset_output = _load_settings().get("headset_default_output", True)
         self._headset_saved = None         # (render defaults before, controller endpoint)
         self._playback_chosen = threading.Event()
         server.device.on_headset = lambda plugged: threading.Thread(

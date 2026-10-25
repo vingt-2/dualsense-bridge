@@ -42,17 +42,9 @@ class Action:
         """Held actions: the shortcut was let go."""
 
 
-class SwitchAudioOutput(Action):
-    id = "audio_output"
-    name = "Switch audio output"
+class _AudioOutputAction(Action):
     # The bridge doesn't carry the controller's speaker audio yet, so its sound device is silent.
     HIDDEN = ("DualSense Wireless Controller",)
-
-    def summary(self, params):
-        names = [name for _, name in params["devices"]]
-        if len(names) == 1:
-            return f"Switch audio output to {names[0]}"
-        return "Cycle audio output through " + ", ".join(names)
 
     def _outputs(self):
         try:
@@ -61,31 +53,20 @@ class SwitchAudioOutput(Action):
             print(f"[audio] could not list playback devices: {e}")
             return []
 
-    def editor(self, parent, params):
-        s = ui.scale
+    def _device_rows(self, params):
+        """[(endpoint id, name, label)]: the devices plugged in, plus chosen ones that aren't."""
         chosen = dict(map(tuple, params["devices"])) if params else {}
         outputs = self._outputs()
         present = {i for i, _ in outputs}
-        rows = []
-        for endpoint_id, name in outputs + [(i, n) for i, n in chosen.items() if i not in present]:
-            var = tk.BooleanVar(value=endpoint_id in chosen)
-            ui.checkbox(parent, name if endpoint_id in present else f"{name} (not connected)",
-                        var).pack(fill="x")
-            rows.append((endpoint_id, name, var))
-        if not rows:
-            label(parent, "No playback devices found.", color=MUTED, anchor="w").pack(fill="x")
-        label(parent, "Tick one device to always switch to it, or several to go to the next one "
-                      "each time.", size=9, color=MUTED, anchor="w", justify="left",
-              wraplength=int(408 * s)).pack(fill="x", pady=(int(4 * s), 0))
+        return ([(i, n, n) for i, n in outputs]
+                + [(i, n, f"{n} (not connected)") for i, n in chosen.items() if i not in present])
 
-        def get():
-            devices = [[i, n] for i, n, var in rows if var.get()]
-            if not devices:
-                raise ActionError("Tick at least one playback device.")
-            return {"devices": devices}
-        return get
+    def _hint(self, parent, text):
+        label(parent, text, size=9, color=MUTED, anchor="w", justify="left",
+              wraplength=int(408 * ui.scale)).pack(fill="x", pady=(int(4 * ui.scale), 0))
 
     def run(self, params):
+        """Switch to the next connected device of params["devices"] after the current one."""
         try:
             outputs = dict(audio_default.list_outputs())
             ids = [i for i, _ in params["devices"] if i in outputs]
@@ -97,6 +78,58 @@ class SwitchAudioOutput(Action):
         except OSError as e:
             raise ActionError(f"Could not switch the audio output: {e}")
         return f"Audio output: {outputs[target]}"
+
+
+class SwitchAudioOutput(_AudioOutputAction):
+    id = "audio_output"
+    name = "Switch audio output"
+
+    def summary(self, params):
+        return f"Switch audio output to {params['devices'][0][1]}"
+
+    def editor(self, parent, params):
+        rows = self._device_rows(params)
+        choice = tk.StringVar(value=params["devices"][0][0] if params else "")
+        for endpoint_id, _, text in rows:
+            ui.radio(parent, text, choice, endpoint_id).pack(fill="x")
+        if not rows:
+            label(parent, "No playback devices found.", color=MUTED, anchor="w").pack(fill="x")
+        self._hint(parent, "To go back and forth between several devices, use "
+                           "\"Cycle audio outputs\" instead.")
+
+        def get():
+            for endpoint_id, name, _ in rows:
+                if endpoint_id == choice.get():
+                    return {"devices": [[endpoint_id, name]]}
+            raise ActionError("Choose a playback device.")
+        return get
+
+
+class CycleAudioOutputs(_AudioOutputAction):
+    id = "audio_cycle"
+    name = "Cycle audio outputs"
+
+    def summary(self, params):
+        return "Cycle audio output through " + ", ".join(n for _, n in params["devices"])
+
+    def editor(self, parent, params):
+        rows = self._device_rows(params)
+        chosen = {i for i, _ in params["devices"]} if params else set()
+        ticks = []
+        for endpoint_id, name, text in rows:
+            var = tk.BooleanVar(value=endpoint_id in chosen)
+            ui.checkbox(parent, text, var).pack(fill="x")
+            ticks.append((endpoint_id, name, var))
+        if not rows:
+            label(parent, "No playback devices found.", color=MUTED, anchor="w").pack(fill="x")
+        self._hint(parent, "Each press switches to the next ticked device, in this order.")
+
+        def get():
+            devices = [[i, n] for i, n, var in ticks if var.get()]
+            if len(devices) < 2:
+                raise ActionError("Tick at least two playback devices to cycle through.")
+            return {"devices": devices}
+        return get
 
 
 class AltTab(Action):
@@ -180,4 +213,4 @@ class HideCursor(Action):
         return None   # the cursor vanishing is feedback enough
 
 
-ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab(), WindowSwitcher(), HideCursor()]}
+ACTIONS = {a.id: a for a in [SwitchAudioOutput(), CycleAudioOutputs(), AltTab(), WindowSwitcher(), HideCursor()]}

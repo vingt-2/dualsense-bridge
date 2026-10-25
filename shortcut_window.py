@@ -26,8 +26,10 @@ class Shortcut:
 
     @classmethod
     def from_json(cls, d):
-        return cls(list(d.get("buttons", [])), int(d.get("presses", 1)),
-                   d.get("action", "audio_output"), dict(d.get("params", {})))
+        action, params = d.get("action", "audio_output"), dict(d.get("params", {}))
+        if action == "audio_output" and len(params.get("devices", [])) > 1:
+            action = "audio_cycle"   # "Switch" took several devices before "Cycle" existed
+        return cls(list(d.get("buttons", [])), int(d.get("presses", 1)), action, params)
 
     @property
     def hold(self):

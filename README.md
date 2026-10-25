@@ -57,8 +57,8 @@ Right-click the icon for:
   combination (e.g. *L1 + R1 + Options*), pressed one or more times (e.g. *PS ×3*); record it by
   pressing it on the controller. Games still see the buttons, so pick something they don't use.
   Actions so far:
-  - **Switch audio output**: tick one playback device to switch to it, or several to go to the
-    next one each time.
+  - **Switch audio output**: switches to one playback device.
+  - **Cycle audio outputs**: tick two or more playback devices; each press goes to the next one.
   - **Switch window (Alt+Tab)**: goes back to the previous window; use it again to come back.
   - **Scroll through windows**: like holding Alt and pressing Tab. With a combination such as
     *L1 + R1*, hold L1 and tap R1 to move through the windows, then let go of L1 to switch; with a

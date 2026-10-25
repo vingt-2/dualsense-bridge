@@ -91,3 +91,9 @@ def checkbox(parent, text, variable, **kw):
     return tk.Checkbutton(parent, text=text, variable=variable, bg=parent["bg"], fg=TEXT,
                           selectcolor=PANEL, activebackground=parent["bg"],
                           activeforeground=TEXT, font=("Segoe UI", 10), anchor="w", **kw)
+
+
+def radio(parent, text, variable, value, **kw):
+    return tk.Radiobutton(parent, text=text, variable=variable, value=value, bg=parent["bg"],
+                          fg=TEXT, selectcolor=PANEL, activebackground=parent["bg"],
+                          activeforeground=TEXT, font=("Segoe UI", 10), anchor="w", **kw)

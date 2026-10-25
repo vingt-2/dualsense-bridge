@@ -23,8 +23,11 @@ from PIL import Image, ImageDraw
 
 import audio_default
 import quality_window
+import shortcut_window
 from bridge import BluetoothDualSense
 from dualsense_usb import WiredDualSense
+from shortcut_window import AudioShortcut
+from shortcuts import ShortcutEngine, decode, describe
 from usbip_server import UsbIpServer
 
 APP = "DualSense Bridge"
@@ -125,6 +128,12 @@ class TrayApp:
         self.hidden_ids = set()
         self._hide_lock = threading.Lock()
         bt.before_open = lambda path: self._hide_ids({_hid_instance_id(path)})
+        settings = _load_settings()
+        self.audio_shortcuts = [AudioShortcut.from_json(d) for d in settings.get("audio_shortcuts", [])]
+        self.audio_notify = settings.get("audio_shortcut_notify", True)
+        self.shortcut_engine = ShortcutEngine(self._switch_audio)
+        self.shortcut_engine.set_shortcuts(self.audio_shortcuts)
+        bt.on_buttons = lambda *b: self.shortcut_engine.update(decode(*b))
         self.port = None
         self.state = "waiting"
         self._startup = None
@@ -136,6 +145,7 @@ class TrayApp:
             pystray.MenuItem("Connection quality…", lambda: quality_window.show(self.bt)),
             pystray.MenuItem("Turn off controller", self._power_off,
                              enabled=lambda _: self.state != "waiting"),
+            pystray.MenuItem("Audio shortcuts…", lambda: shortcut_window.show(self)),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Hide Bluetooth controller from games", self._toggle_hide,
                              checked=lambda _: self.hide_enabled,
@@ -215,6 +225,32 @@ class TrayApp:
     def _power_off(self):
         if not self.bt.power_off():
             self.icon.notify("Could not turn off the controller – see the log.", APP)
+
+    # -- audio shortcuts ----------------------------------------------------------
+    def save_audio_shortcuts(self, shortcuts, notify):
+        self.audio_shortcuts, self.audio_notify = shortcuts, notify
+        self.shortcut_engine.set_shortcuts(shortcuts)
+        _save_settings({"audio_shortcuts": [sc.to_json() for sc in shortcuts],
+                        "audio_shortcut_notify": notify})
+
+    def _switch_audio(self, shortcut):
+        """Switch to the shortcut's device, or to the next one if it has several."""
+        try:
+            outputs = dict(audio_default.list_outputs())
+            ids = [i for i, _ in shortcut.devices if i in outputs]
+            if not ids:
+                print(f"[audio] {describe(shortcut.buttons, shortcut.presses)}: no device connected")
+                self.icon.notify("None of this shortcut's playback devices are connected.", APP)
+                return
+            current = audio_default.get_defaults().get((audio_default.E_RENDER, 0))
+            target = ids[(ids.index(current) + 1) % len(ids)] if current in ids else ids[0]
+            audio_default.set_output(target)
+        except OSError as e:
+            print(f"[audio] could not switch playback device: {e}")
+            return
+        print(f"[audio] {describe(shortcut.buttons, shortcut.presses)}: output -> {outputs[target]}")
+        if self.audio_notify:
+            self.icon.notify(f"Audio output: {outputs[target]}", APP)
 
     # -- default audio devices --------------------------------------------------
     def _audio_defaults(self):

@@ -67,6 +67,61 @@ def get_defaults():
     return out
 
 
+class _PropVariant(ctypes.Structure):
+    _fields_ = [("vt", ctypes.c_ushort), ("reserved", ctypes.c_ushort * 3),
+                ("value", ctypes.c_void_p), ("pad", ctypes.c_void_p)]
+
+
+class _PropertyKey(ctypes.Structure):
+    _fields_ = [("fmtid", ctypes.c_byte * 16), ("pid", ctypes.c_ulong)]
+
+
+PKEY_Device_FriendlyName = _PropertyKey(_guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"), 14)
+DEVICE_STATE_ACTIVE = 1
+VT_LPWSTR = 31
+
+
+def list_outputs():
+    """[(endpoint id, friendly name)] of the playback devices that are plugged in."""
+    ole32.CoInitialize(None)
+    enum = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+    out = []
+    try:
+        coll = ctypes.c_void_p()  # IMMDeviceEnumerator::EnumAudioEndpoints
+        _call(enum, 3, E_RENDER, DEVICE_STATE_ACTIVE, ctypes.byref(coll),
+              argtypes=(ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p)))
+        count = ctypes.c_uint()
+        _call(coll, 3, ctypes.byref(count), argtypes=(ctypes.POINTER(ctypes.c_uint),))  # GetCount
+        for i in range(count.value):
+            dev, pid, store = ctypes.c_void_p(), wt.LPWSTR(), ctypes.c_void_p()
+            _call(coll, 4, i, ctypes.byref(dev), argtypes=(ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)))
+            _call(dev, 5, ctypes.byref(pid), argtypes=(ctypes.POINTER(wt.LPWSTR),))  # GetId
+            endpoint_id = pid.value
+            ole32.CoTaskMemFree(pid)
+            name = endpoint_id
+            _call(dev, 4, 0, ctypes.byref(store),  # OpenPropertyStore(STGM_READ)
+                  argtypes=(ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p)))
+            var = _PropVariant()
+            _call(store, 5, ctypes.byref(PKEY_Device_FriendlyName), ctypes.byref(var),  # GetValue
+                  argtypes=(ctypes.POINTER(_PropertyKey), ctypes.POINTER(_PropVariant)))
+            if var.vt == VT_LPWSTR:
+                name = ctypes.wstring_at(var.value)
+            ole32.PropVariantClear(ctypes.byref(var))
+            _release(store)
+            _release(dev)
+            out.append((endpoint_id, name))
+        _release(coll)
+    finally:
+        _release(enum)
+    return sorted(out, key=lambda d: d[1].lower())
+
+
+def set_output(endpoint_id):
+    """Make this the default playback device for every role."""
+    for role in ROLES:
+        set_default(endpoint_id, role)
+
+
 def set_default(endpoint_id, role):
     ole32.CoInitialize(None)
     pc = _create(CLSID_PolicyConfig, IID_IPolicyConfig)

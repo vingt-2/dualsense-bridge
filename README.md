@@ -53,6 +53,10 @@ Right-click the icon for:
   for the controller and the Bluetooth adapter: press *Reset* after each change and give it 30 seconds.
   Gaps longer than the haptics delay can make haptics stutter.
 - **Turn off controller**: powers the controller down (press PS to turn it back on).
+- **Audio shortcuts…**: switch Windows' playback device from the controller. A shortcut is a
+  button combination (e.g. *L1 + R1 + Options*), pressed one or more times (e.g. *PS ×3*); record it
+  by pressing it on the controller. Tick one playback device to switch to it, or several to go to
+  the next one each time. Games still see the buttons, so pick something they don't use.
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;
   *Low* or *Lowest* feel more immediate but may stutter when the PC or Bluetooth is busy.
 - **Hide Bluetooth controller from games** (HidHide), on by default.

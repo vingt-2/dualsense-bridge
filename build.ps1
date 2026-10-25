@@ -9,6 +9,8 @@ python -m pip install --quiet --disable-pip-version-check -r requirements.txt
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 python tests\test_usbip_device.py
 if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
+python tests\test_shortcuts.py
+if ($LASTEXITCODE -ne 0) { throw "shortcut self-test failed" }
 
 python -m PyInstaller --noconfirm --onefile --noconsole --uac-admin `
     --name DualSenseBridge --icon icon.ico --hidden-import pystray._win32 tray_app.py

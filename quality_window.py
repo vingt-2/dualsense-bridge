@@ -1,28 +1,21 @@
 """Connection quality window: live Bluetooth link stats, for finding a good spot for the
 controller and the Bluetooth adapter.
 
-Runs its own Tk loop on its own thread (the tray owns the main thread). All Tk calls stay
-on that thread; the tray only sets `_raise_requested`.
+Lives on the shared UI thread (see ui.py).
 """
-import ctypes
 import threading
 import time
 import tkinter as tk
 
+import ui
 from link_stats import DROPOUT, rating
+from ui import GRID, MUTED, PANEL, SURFACE, TEXT, TEXT_2, label
 
 CHART_SECONDS = 60
 RECENT_SECONDS = 10
 
-# Dark surface and text tokens; status colors are reserved for the rating, which always
-# carries its label too.
-SURFACE = "#1a1a19"
-PANEL = "#242423"
-TEXT = "#f0efec"
-TEXT_2 = "#c3c2b7"
-MUTED = "#8a897f"
-GRID = "#3a3a38"
-SERIES = "#3987e5"
+SERIES = ui.ACCENT
+# Status colors are reserved for the rating, which always carries its label too.
 STATUS = {"Excellent": ("#0ca30c", "●"), "Good": ("#0ca30c", "●"),
           "Fair": ("#fab219", "▲"), "Poor": ("#d03b3b", "■")}
 
@@ -32,18 +25,19 @@ TIPS = ("Tips: keep a clear line of sight between the controller and the Bluetoo
         "or use 5 GHz Wi-Fi. Press Reset after each change and give it 30 seconds.")
 
 _window = None
-_window_lock = threading.Lock()
 
 
 def show(bt):
     """Open the window, or bring it to the front if it is already open."""
+    ui.call(lambda: _show(bt))
+
+
+def _show(bt):
     global _window
-    with _window_lock:
-        if _window is not None:
-            _window._raise_requested = True
-            return
+    if _window is not None and _window.root.winfo_exists():
+        ui.bring_to_front(_window.root)
+    else:
         _window = QualityWindow(bt)
-    threading.Thread(target=_window.run, daemon=True).start()
 
 
 def _fmt_duration(seconds):
@@ -54,37 +48,16 @@ def _fmt_duration(seconds):
 class QualityWindow:
     def __init__(self, bt):
         self.bt = bt
-        self._raise_requested = False
         self._bars = []    # (x0, x1, text) for hover
         self._mouse_x = None
-
-    def run(self):
-        global _window
-        try:
-            # Sharp text on scaled displays, for this thread's windows only.
-            ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
-        except (AttributeError, OSError):
-            pass
-        try:
-            self._build()
-            self._tick()
-            self.root.mainloop()
-        finally:
-            with _window_lock:
-                _window = None
+        self._build()
+        self._tick()
 
     # -- layout ---------------------------------------------------------------
     def _build(self):
-        self.root = root = tk.Tk()
-        root.title("DualSense Bridge – Connection quality")
-        root.configure(bg=SURFACE)
-        root.minsize(520, 0)
-        self.s = s = root.winfo_fpixels("1i") / 96   # px per 96-dpi px
+        self.root = root = ui.window("Connection quality")
+        self.s = s = ui.scale
         pad = int(16 * s)
-
-        def label(parent, text="", size=10, color=TEXT, bold=False, **kw):
-            return tk.Label(parent, text=text, bg=parent["bg"], fg=color,
-                            font=("Segoe UI", size, "bold" if bold else "normal"), **kw)
 
         top = tk.Frame(root, bg=SURFACE)
         top.pack(fill="x", padx=pad, pady=(pad, 0))
@@ -121,15 +94,12 @@ class QualityWindow:
         since.pack(fill="x", padx=pad, pady=(int(12 * s), 0))
         self.since_text = label(since, color=TEXT_2, anchor="w", justify="left")
         self.since_text.pack(side="left", fill="x", expand=True)
-        tk.Button(since, text="Reset", command=self.bt.link.reset, bg=PANEL, fg=TEXT,
-                  activebackground=GRID, activeforeground=TEXT, relief="flat",
-                  font=("Segoe UI", 10), padx=int(14 * s), pady=int(2 * s)).pack(side="right")
+        ui.button(since, "Reset", self.bt.link.reset).pack(side="right")
 
         label(root, TIPS, size=9, color=MUTED, anchor="w", justify="left",
               wraplength=int(488 * s)).pack(fill="x", padx=pad, pady=(int(12 * s), pad))
         root.bind("<Configure>", lambda e: e.widget is root and self._rewrap())
-        root.lift()
-        root.focus_force()
+        ui.bring_to_front(root)
 
     def _rewrap(self):
         for w in self.root.pack_slaves():
@@ -138,11 +108,8 @@ class QualityWindow:
 
     # -- updates --------------------------------------------------------------
     def _tick(self):
-        if self._raise_requested:
-            self._raise_requested = False
-            self.root.deiconify()
-            self.root.lift()
-            self.root.focus_force()
+        if not self.root.winfo_exists():
+            return
         self.history, total, elapsed = self.bt.link.snapshot()
         connected = self.bt.link.connected
         recent = self.history[-RECENT_SECONDS:]
@@ -269,5 +236,6 @@ if __name__ == "__main__":
             FakeBt.link.input_report()
 
     threading.Thread(target=feed, daemon=True).start()
-    w = QualityWindow(FakeBt)
-    w.run()
+    show(FakeBt)
+    while ui.root is None or _window is None or _window.root.winfo_exists():
+        time.sleep(0.5)

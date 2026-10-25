@@ -31,6 +31,7 @@ class BluetoothDualSense:
         self.on_input = None
         self.on_state = None  # called with True/False on connect/disconnect
         self.before_open = None  # called with the HID path before the controller is opened
+        self.on_buttons = None   # called with the 3 button bytes whenever they change
         self._seq = 0
         self._haptics_counter = 0
         self._haptics_last = 0.0
@@ -76,6 +77,7 @@ class BluetoothDualSense:
         while True:
             self.connect_blocking()
             simple_reports = 0
+            buttons = None
             try:
                 while True:
                     r = self.dev.read(BT_REPORT_SIZE, 1000)
@@ -85,6 +87,9 @@ class BluetoothDualSense:
                         self.link.input_report()
                         if self.on_input:
                             self.on_input(bt_input_to_usb(r))
+                        if self.on_buttons and r[9:12] != buttons:
+                            buttons = r[9:12]
+                            self.on_buttons(*buttons)
                     elif r[0] == 0x01:
                         simple_reports += 1
                         if simple_reports % 50 == 1:  # still in simple mode; ask again

@@ -1,10 +1,14 @@
 """Emulated wired (USB) DualSense: descriptors and USB<->Bluetooth report translation."""
+import json
+import os
 import struct
 import threading
+import time
 import zlib
 from collections import deque
 
-from haptics import HapticsConverter, PacedSender
+from haptics import HapticsConverter
+from media import MediaStreamer, MicStream, SpeakerStream, speaker_setup_output
 from usb_audio import AudioFunction
 from usbip_server import EPIPE
 
@@ -186,9 +190,47 @@ class WiredDualSense:
         self._fresh = False
         self._server = None
         self._seen = set()              # host requests already logged once
-        self.haptics = HapticsConverter(PacedSender(bt.write_haptics).put)
-        self.audio = AudioFunction(on_haptics=self.haptics.feed)
+        self.speaker = SpeakerStream(on_start=self._speaker_started,
+                                     on_stop=self._speaker_stopped)
+        self.media = MediaStreamer(bt.write_media, self.speaker)
+        self.haptics = HapticsConverter(self.media.put)
+        self.mic = MicStream()
+        bt.on_mic = self.mic.packet
+        self.audio = AudioFunction(on_haptics=self.haptics.feed, on_speaker=self.speaker.feed,
+                                   mic=self.mic)
         bt.on_input = self._on_bt_input
+
+    def _speaker_stopped(self):
+        history, total, _ = self.bt.link.snapshot()
+        recent = [x for x in history if x.start >= self._speaker_since]
+        worst = max((x.worst for x in recent), default=0) * 1000
+        dropouts = total.dropouts - self._speaker_dropouts
+        print(f"[audio] speaker stream stopped: {self.speaker.summary()}; Bluetooth meanwhile: "
+              f"{dropouts} input gaps over 10 ms, longest {worst:.0f} ms")
+
+    def _speaker_started(self):
+        _, total, _ = self.bt.link.snapshot()
+        self._speaker_dropouts, self._speaker_since = total.dropouts, time.perf_counter()
+        self._load_debug()
+        print(f"[audio] speaker stream started ({'headphones' if self.bt.headset else 'speaker'}, "
+              f"report 0x{self.bt.speaker_format:02x})")
+        self.bt.write_usb_output(speaker_setup_output(self.bt.headset))
+
+    def _load_debug(self):
+        """Development knobs, read each time a speaker stream starts so they can be tried
+        without restarting: %LOCALAPPDATA%\\DualSenseBridge\\debug.json, e.g.
+        {"speaker_format": 57, "speaker_buffers": [64, 64, 64, 64], "ps5_config": [81, 31, 98, 40]}"""
+        path = os.path.join(os.environ.get("LOCALAPPDATA", "."), "DualSenseBridge", "debug.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            return
+        self.bt.speaker_format = d.get("speaker_format", self.bt.speaker_format)
+        self.bt.speaker_buffers = tuple(d.get("speaker_buffers", self.bt.speaker_buffers))
+        self.bt.ps5_config = tuple(d.get("ps5_config", self.bt.ps5_config))
+        self.mic.PREBUFFER = d.get("mic_prebuffer", type(self.mic).PREBUFFER)
+        print(f"[audio] debug settings: {d}")
 
     def _log_once(self, key, msg):
         if key not in self._seen:
@@ -275,6 +317,10 @@ class WiredDualSense:
         if rtype in (0x00, 0x01, 0x02) and req in (0x01, 0x03, 0x09, 0x0B):
             if req == 0x0B:  # SET_INTERFACE
                 self._log_once(("alt", index, value), f"host selected interface {index} alt {value}")
+                if index == 2:   # the mic stream: Windows opens it when an app records
+                    print(f"[usb] mic interface alt {value} ({self.mic.summary()})")
+                    self.mic.reset()
+                    self.bt.set_mic(value == 1)
             return 0, b""  # CLEAR/SET_FEATURE, SET_CONFIGURATION, SET_INTERFACE
 
         # Audio class: interface 0 entities, or the iso endpoints

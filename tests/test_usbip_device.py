@@ -5,32 +5,46 @@ output, URB unlinking, isochronous audio in both directions and the haptics path
 No controller or drivers needed:  python tests\\test_usbip_device.py
 """
 import array
+import math
 import os
 import socket
 import struct
 import sys
+import tempfile
 import threading
 import time
 import zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+os.environ["LOCALAPPDATA"] = tempfile.mkdtemp()   # don't pick up the user's debug.json
 from dualsense_usb import CONFIG_DESC, REPORT_DESC, WiredDualSense, bt_input_to_usb, usb_output_to_bt
 from usbip_server import UsbIpServer
+from link_stats import LinkStats
+import opus
 
 PORT = 13240
 
 
 class FakeBluetooth:
-    on_input = None
+    on_input = on_mic = None
+    headset = False
+    speaker_format = 0x36
+    link = LinkStats()
 
     def __init__(self):
-        self.outputs, self.haptics = [], []
+        self.outputs, self.haptics, self.frames, self.mic = [], [], [], []
 
     def write_usb_output(self, report):
         self.outputs.append(usb_output_to_bt(report, 0))
 
-    def write_haptics(self, block):
-        self.haptics.append(block)
+    def write_media(self, block, frame=None):
+        if block:
+            self.haptics.append(block)
+        if frame:
+            self.frames.append(frame)
+
+    def set_mic(self, on):
+        self.mic.append(on)
 
     def get_feature(self, rid, size):
         return bytes([rid]) + bytes(size - 1)
@@ -150,13 +164,36 @@ def main():
     time.sleep(0.1)
     assert bt.haptics and any(bt.haptics[0]), "no haptics blocks produced"
 
-    # iso IN on the mic endpoint returns silence
+    # speaker audio on channels 1-2 -> 200-byte Opus frames, after routing the audio
+    outputs_before = len(bt.outputs)
+    for seq in range(30, 40):
+        tone = [int(8000 * math.sin(2 * math.pi * 440 * (seq * 480 + i) / 48000)) for i in range(480)]
+        frames = array.array("h", [v for t in tone for v in (t, t, 0, 0)]).tobytes()
+        descs = b"".join(struct.pack(">IIIi", i * 384, 384, 0, 0) for i in range(10))
+        submit(seq, 1, False, len(frames), data=frames, npackets=10, iso=descs)
+    for _ in range(10):
+        assert ret(dir_in=False, iso=True)[2] == 0
+    time.sleep(0.1)
+    assert bt.frames and all(len(f) == 200 and f[0] == 0xF4 for f in bt.frames), "no speaker frames"
+    setup = bt.outputs[outputs_before]
+    assert setup[3] & 0x80 and setup[10] == 0x30, "speaker not routed"
+
+    # iso IN on the mic endpoint: silence until the mic is opened, then its audio
     descs = b"".join(struct.pack(">IIIi", i * 196, 196, 0, 0) for i in range(4))
     submit(40, 2, True, 784, npackets=4, iso=descs)
     _, _, status, data = ret(iso=True)
     assert status == 0 and data == bytes(len(data)) and len(data) == 4 * 192
+    assert control(41, 0x01, 0x0B, 1, 2, 0)[2] == 0 and bt.mic == [True]   # SET_INTERFACE 2 alt 1
+    enc = opus.Encoder(71)
+    for k in range(8):   # more than the mic's 50 ms cushion
+        pcm = array.array("h", [int(8000 * math.sin(2 * math.pi * 300 * i / 48000))
+                                for i in range(k * 480, (k + 1) * 480) for _ in (0, 1)])
+        bt.on_mic(k, enc.encode(pcm))
+    submit(42, 2, True, 784, npackets=4, iso=descs)
+    _, _, status, data = ret(iso=True)
+    assert status == 0 and any(data), "mic audio didn't reach the USB mic"
 
-    print("OK: descriptors, HID in/out, unlink, iso audio and haptics all pass")
+    print("OK: descriptors, HID in/out, unlink, iso audio, haptics, speaker and mic all pass")
 
 
 if __name__ == "__main__":

@@ -67,12 +67,14 @@ def _tick_list(parent, rows, params, key, all_text):
 
 
 class _AudioOutputAction(Action):
-    # The bridge doesn't carry the controller's speaker audio yet, so its sound device is silent.
-    HIDDEN = ("DualSense Wireless Controller",)
+    # The controller's own speaker: listed, but left out of "All connected" cycles so they
+    # don't send the game's sound to the controller unless it's picked on purpose.
+    CONTROLLER = "DualSense Wireless Controller"
 
-    def _outputs(self):
+    def _outputs(self, with_controller=True):
         try:
-            return [d for d in audio_default.list_outputs() if not any(h in d[1] for h in self.HIDDEN)]
+            return [d for d in audio_default.list_outputs()
+                    if with_controller or self.CONTROLLER not in d[1]]
         except OSError as e:
             print(f"[audio] could not list playback devices: {e}")
             return []
@@ -95,7 +97,7 @@ class _AudioOutputAction(Action):
         try:
             outputs = dict(audio_default.list_outputs())
             if params.get("all"):
-                ids = [i for i, _ in self._outputs()]
+                ids = [i for i, _ in self._outputs(with_controller=False)]
             else:
                 ids = [i for i, _ in params["devices"] if i in outputs]
             if not ids:
@@ -144,7 +146,7 @@ class CycleAudioOutputs(_AudioOutputAction):
 
     def editor(self, parent, params):
         ticked = _tick_list(parent, self._device_rows(params), params, "devices",
-                            "All connected playback devices")
+                            "All connected playback devices (except the controller)")
         self._hint(parent, "Each press switches to the next device, in this order.")
 
         def get():

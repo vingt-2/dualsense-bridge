@@ -2,3 +2,4 @@ hidapi>=0.14
 pystray>=0.19
 pillow>=10
 pyinstaller>=6
+PyOgg==0.6.14a1   # only for its opus.dll (libopus), bundled into the exe

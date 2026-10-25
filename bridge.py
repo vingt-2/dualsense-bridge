@@ -1,4 +1,4 @@
-﻿"""DualSense Bluetooth -> wired USB bridge.
+"""DualSense Bluetooth -> wired USB bridge.
 
 Usage:
     python bridge.py            # start the bridge, then: usbip attach -r 127.0.0.1 -b 1-1
@@ -12,6 +12,8 @@ import hid
 from dualsense_usb import (BT_REPORT_SIZE, VID, PID, WiredDualSense, bt_input_to_usb,
                            firmware_uses_vibration_v2, usb_output_to_bt, _bt_crc)
 from haptics import DEFAULT_DEPTH, bt_haptics_report
+from media import (MIC_TYPE, PS5_CONFIG, SPEAKER_BUFFERS, audio_control_report,
+                   speaker_report, speaker_report_pair)
 from link_stats import LinkStats
 from usbip_server import UsbIpServer
 
@@ -32,6 +34,15 @@ class BluetoothDualSense:
         self.on_state = None  # called with True/False on connect/disconnect
         self.before_open = None  # called with the HID path before the controller is opened
         self.on_buttons = None   # called with the 3 button bytes whenever they change
+        self.on_mic = None       # called with (counter, Opus bytes) for each mic packet
+        self.mic_enabled = False
+        self.headset = False     # play speaker audio on the headphone jack
+        # 0x39 (two Opus frames per report, as a PS5 sends) rides over Bluetooth stalls far
+        # better than 0x36 (one): ~3 dropouts in 5 s against ~20, same link.
+        self.speaker_format = 0x39
+        self.speaker_buffers = SPEAKER_BUFFERS
+        self.ps5_config = PS5_CONFIG
+        self._pending = None         # 0x39: the first half of a report
         self._seq = 0
         self._haptics_counter = 0
         self._haptics_last = 0.0
@@ -65,6 +76,8 @@ class BluetoothDualSense:
                         continue
                     self.vibration_v2 = firmware_uses_vibration_v2(self.get_feature(0x20, 64))
                     print(f"[bt] DualSense connected (rumble {'v2' if self.vibration_v2 else 'v1'})")
+                    if self.mic_enabled:
+                        self.set_mic(True)
                     self.link.connection(True)
                     if self.on_state:
                         self.on_state(True)
@@ -84,6 +97,10 @@ class BluetoothDualSense:
                     if not r:
                         continue
                     if r[0] == 0x31 and len(r) >= 65:
+                        if r[1] & 0x0F == MIC_TYPE:   # microphone audio, not gamepad state
+                            if self.on_mic:
+                                self.on_mic(r[2], bytes(r[3:74]))
+                            continue
                         self.link.input_report()
                         if self.on_input:
                             self.on_input(bt_input_to_usb(r))
@@ -113,8 +130,9 @@ class BluetoothDualSense:
             except OSError as e:
                 print(f"[bt] write failed: {e}")
 
-    def write_haptics(self, samples):
-        """samples: interleaved int8 stereo at 3 kHz (see haptics.py)."""
+    def write_media(self, samples, frame=None):
+        """samples: interleaved int8 stereo at 3 kHz (see haptics.py), or None;
+        frame: an Opus frame for the speaker (see media.py), or None."""
         if not self.dev:
             return
         with self._io:
@@ -124,13 +142,39 @@ class BluetoothDualSense:
             if now - self._haptics_last > 0.05:
                 self._haptics_counter = 0
             self._haptics_last = now
-            pkt = bt_haptics_report(samples, self._haptics_counter, seq=self._haptics_counter,
-                                    depth=self.haptics_depth)
+            if frame is None:
+                self._pending = None
+                pkt = bt_haptics_report(samples, self._haptics_counter, seq=self._haptics_counter,
+                                        depth=self.haptics_depth, mic=self.mic_enabled)
+            elif self.speaker_format == 0x39:
+                if self._pending is None:
+                    self._pending = (samples or bytes(64), frame)
+                    return
+                (h0, f0), self._pending = self._pending, None
+                pkt = speaker_report_pair((h0, samples or bytes(64)), (f0, frame),
+                                          self._haptics_counter, self._haptics_counter * 2,
+                                          self.mic_enabled, self.headset, self.ps5_config)
+            else:
+                pkt = speaker_report(samples or bytes(64), frame, self._haptics_counter,
+                                     self._haptics_counter, self.haptics_depth,
+                                     self.mic_enabled, self.headset, self.speaker_buffers)
             self._haptics_counter = (self._haptics_counter + 1) & 0xFF
             try:
                 self.dev.write(pkt)
             except OSError as e:
                 print(f"[bt] haptics write failed: {e}")
+
+    def set_mic(self, on):
+        """Start or stop the controller streaming its microphone back."""
+        self.mic_enabled = on
+        if not self.dev:
+            return
+        with self._io:
+            try:
+                self.dev.write(audio_control_report(self._haptics_counter, on))
+            except OSError as e:
+                print(f"[bt] mic control write failed: {e}")
+        print(f"[bt] microphone {'on' if on else 'off'}")
 
     def power_off(self):
         """Turn the controller off by dropping its Bluetooth link (as DS4Windows does):

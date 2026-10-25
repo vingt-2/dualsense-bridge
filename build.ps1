@@ -12,8 +12,13 @@ if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
 python tests\test_shortcuts.py
 if ($LASTEXITCODE -ne 0) { throw "shortcut self-test failed" }
 
+# libopus for the controller's Bluetooth speaker and mic audio (see opus.py)
+$opusDll = python -c "import importlib.util, os; print(os.path.join(importlib.util.find_spec('pyogg').submodule_search_locations[0], 'opus.dll'))"
+if (-not (Test-Path $opusDll)) { throw "opus.dll not found (pip install PyOgg)" }
+
 python -m PyInstaller --noconfirm --onefile --noconsole --uac-admin `
-    --name DualSenseBridge --icon icon.ico --hidden-import pystray._win32 tray_app.py
+    --name DualSenseBridge --icon icon.ico --hidden-import pystray._win32 `
+    --add-binary "$opusDll;." tray_app.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",

@@ -17,7 +17,9 @@ virtual USB DualSense that looks like the real wired one, so those games enable 
 | Adaptive triggers | ✅ |
 | Lightbar, player LEDs, mic LED | ✅ |
 | HD haptics (e.g. Assassin's Creed Mirage) | ✅ ~50 ms delay by default, adjustable |
-| Controller speaker and microphone | ❌ not bridged |
+| Controller speaker | ✅ |
+| Controller microphone | ✅ |
+| Headphone jack | ❌ not yet |
 
 Tested with Assassin's Creed Mirage on Windows 11. Not affiliated with or endorsed by Sony.
 
@@ -121,6 +123,8 @@ Bluetooth report formats in both directions:
 | feature GET (`0x05`, `0x09`, `0x20`, …) | same id, CRC (seed `0xA3`) blanked |
 | feature SET (e.g. `0x08` from Steam) | acknowledged, **not** forwarded: it disconnects the controller over Bluetooth |
 | haptics: USB audio, 4ch 48 kHz int16, channels 3–4 | output `0x32` (142 B): 32 frames of 3 kHz int8 stereo |
+| speaker: USB audio channels 1–2 | output `0x39` (547 B): two 10 ms Opus frames (CELT, 200 B each) + two haptics blocks, every 21.3 ms |
+| mic: USB audio in, stereo 48 kHz | input `0x31` with type 2 in byte 1: a counter and a 71-byte Opus frame, every 10 ms |
 
 ### Findings
 
@@ -145,6 +149,15 @@ These cost some debugging and are documented here in case they help others:
   or the haptics stream never stops.
 - The audio endpoints use **`bInterval=1`**. The real controller's `4` makes usbip-win2 never start
   the audio stream.
+- **Speaker and mic over Bluetooth** follow [LinuxAudio4Dualsense5](https://github.com/GeorgLegato/LinuxAudio4Dualsense5)
+  and [dualwave](https://github.com/jpbjesus/dualwave), from Nielk1's PS5 captures. Each 10 ms Opus
+  frame carries 512 input samples squeezed into 480, as the controller plays one per 10.667 ms.
+  The PS5's report `0x39` (two frames per report) survived Bluetooth stalls far better than `0x36`
+  (one): measured with the controller's mic listening to its own speaker, ~3 dropouts per 5 s against
+  ~20 on the same link. The last byte of its config packet is the speaker buffer: the PS5's `0x28`
+  still dropped out a little, `0x3C` was clean for ~15 ms more delay.
+- Mic packets arrive in the same input report id as the gamepad state, so they must be filtered out
+  or they read as stick and button input.
 - **Rumble on newer firmware** (update version ≥ `0x0215`) needs `valid_flag2` bit 2 plus
   `valid_flag0` bit 1 (haptics select); older firmware uses `valid_flag0` bits 0–1. The bridge reads
   the firmware version and rewrites the flags, whichever style the game sent.
@@ -170,7 +183,9 @@ To run from source instead: `pip install -r requirements.txt`, install usbip-win
 | `bridge.py` | Bluetooth side: reads/writes the real controller with hidapi |
 | `dualsense_usb.py` | The emulated wired DualSense: descriptors, report translation |
 | `usb_audio.py` | Its USB audio function (haptics in, silent mic out) |
-| `haptics.py` | USB haptics audio → Bluetooth haptics reports, pacing |
+| `haptics.py` | USB haptics audio → Bluetooth haptics reports |
+| `media.py` | Speaker (Opus encode) and mic (Opus decode) audio, pacing of the media reports |
+| `opus.py` | Minimal libopus binding |
 | `usbip_server.py` | Minimal USB/IP server |
 | `audio_default.py` | Restores Windows' default sound devices |
 | `installer/` | Inno Setup script and the dependency downloader |
@@ -178,6 +193,9 @@ To run from source instead: `pip install -r requirements.txt`, install usbip-win
 ## Credits
 
 - [SAxense](https://github.com/egormanga/SAxense) by Sdore: DualSense Bluetooth haptics research.
+- [LinuxAudio4Dualsense5](https://github.com/GeorgLegato/LinuxAudio4Dualsense5) and
+  [dualwave](https://github.com/jpbjesus/dualwave): the Bluetooth speaker and mic protocol.
+- [libopus](https://opus-codec.org/) (BSD), via the [PyOgg](https://github.com/TeamPyOgg/PyOgg) build.
 - [usbip-win2](https://github.com/vadimgrn/usbip-win2) and [HidHide](https://github.com/nefarius/HidHide),
   which do the driver-level work.
 - [hidapi](https://github.com/trezor/cython-hidapi), [pystray](https://github.com/moses-palmer/pystray),

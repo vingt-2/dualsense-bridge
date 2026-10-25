@@ -16,7 +16,8 @@ import time
 from usbip_server import EPIPE
 
 SPEAKER_EP, MIC_EP = 0x01, 0x02
-MIC_PACKET = bytes(192)  # 48 samples * 2ch * 16-bit of silence per ms
+MIC_FRAMES = 48          # per 1 ms packet: 48 frames * 2ch * 16-bit = 192 bytes
+SPEAKER_UNIT, MIC_UNIT = 2, 5   # feature units (volume, mute) in the descriptor
 
 # Audio class request codes
 SET_CUR, GET_CUR, GET_MIN, GET_MAX, GET_RES = 0x01, 0x81, 0x82, 0x83, 0x84
@@ -25,8 +26,10 @@ VOLUME_RANGE = {GET_MIN: -0x6000, GET_MAX: 0x0000, GET_RES: 0x0100}  # 1/256 dB 
 
 
 class AudioFunction:
-    def __init__(self, on_haptics=None):
+    def __init__(self, on_haptics=None, on_speaker=None, mic=None):
         self.on_haptics = on_haptics          # callback(list of (ch3, ch4) int16 frames)
+        self.on_speaker = on_speaker          # callback(array('h') of (ch1, ch2) frames, gain)
+        self.mic = mic                        # media.MicStream, or None for silence
         self._controls = {}                   # (entity, selector, channel) -> bytes
         self._sched = []                      # heap of (due, n, urb, payload)
         self._cancelled = set()
@@ -72,7 +75,7 @@ class AudioFunction:
             self._inspect_haptics(urb)
             payload = None
         elif urb.ep == MIC_EP and urb.dir_in:
-            payload = [MIC_PACKET] * len(urb.iso)
+            payload = self._mic_packets(len(urb.iso))
         else:
             return EPIPE, b""
         with self._cv:
@@ -107,10 +110,37 @@ class AudioFunction:
             if self._server:
                 self._server.complete(urb, 0, payload or [])
 
-    # -- haptics --------------------------------------------------------------
+    def gain(self, unit):
+        """0..1 from a feature unit's mute and master volume (1/256 dB) as Windows set
+        them: it leaves applying them to the device."""
+        if self._controls.get((unit, MUTE_CONTROL, 0), bytes(1))[:1] != bytes(1):
+            return 0.0
+        vol = self._controls.get((unit, VOLUME_CONTROL, 0))
+        return 10 ** (struct.unpack("<h", vol[:2])[0] / 256 / 20) if vol and len(vol) >= 2 else 1.0
+
+    # -- microphone -------------------------------------------------------------
+    def _mic_packets(self, n):
+        if self.mic is None:
+            return [bytes(MIC_FRAMES * 4)] * n
+        mono = self.mic.read(MIC_FRAMES * n)
+        gain = self.gain(MIC_UNIT)
+        if gain < 0.999:
+            mono = array.array("h", (int(v * gain) for v in mono))
+        stereo = array.array("h", bytes(len(mono) * 4))
+        stereo[0::2] = mono
+        stereo[1::2] = mono
+        size = MIC_FRAMES * 2
+        return [stereo[i * size:(i + 1) * size].tobytes() for i in range(n)]
+
+    # -- speaker and haptics ----------------------------------------------------
     def _inspect_haptics(self, urb):
         samples = array.array("h")
         samples.frombytes(urb.data[: len(urb.data) // 8 * 8])
+        if self.on_speaker and samples:
+            speaker = array.array("h", bytes(len(samples)))   # half as many: 2 of 4 channels
+            speaker[0::2] = samples[0::4]                 # channels 1 and 2
+            speaker[1::2] = samples[1::4]
+            self.on_speaker(speaker, self.gain(SPEAKER_UNIT))
         frames = list(zip(samples[2::4], samples[3::4]))  # channels 3 and 4
         if frames:
             peak = max(max(abs(a), abs(b)) for a, b in frames)

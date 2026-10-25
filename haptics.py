@@ -5,10 +5,7 @@ Bluetooth: report 0x32 carries a sample packet of interleaved int8 stereo at 3 k
 Layout from SAxense by Sdore (https://github.com/egormanga/SAxense).
 """
 import struct
-import threading
-import time
 import zlib
-from collections import deque
 
 DECIMATE = 16                   # 48000 / 3000
 # 32 frames per report, as SAxense does. Smaller reports start playing sooner in short
@@ -29,14 +26,15 @@ BT_HAPTICS_SIZE = 142
 DEFAULT_DEPTH = 0x20
 
 
-def bt_haptics_report(samples, counter, seq=0, depth=DEFAULT_DEPTH):
-    """samples: interleaved int8 stereo at 3 kHz (up to 64 bytes)."""
+def bt_haptics_report(samples, counter, seq=0, depth=DEFAULT_DEPTH, mic=False):
+    """samples: interleaved int8 stereo at 3 kHz (up to 64 bytes). mic: keep the
+    controller's microphone streaming (bit 0 of the control block, see media.py)."""
     body = bytearray(BT_HAPTICS_SIZE - 4)
     body[0] = 0x32
     body[1] = (seq & 0x0F) << 4                     # seq / tag
     # sub-packet 0x11 (sized): control block. Byte 0 enables haptics (0x10 there
     # silences it), byte 5 is the buffer depth, the last byte a running counter.
-    body[2:11] = bytes([0x80 | 0x11, 7, 0xFE, 0, 0, 0, 0, depth, counter & 0xFF])
+    body[2:11] = bytes([0x80 | 0x11, 7, 0xFE | mic, 0, 0, 0, 0, depth, counter & 0xFF])
     # sub-packet 0x12 (sized): the samples
     body[11:13] = bytes([0x80 | 0x12, len(samples)])
     body[13:13 + len(samples)] = samples
@@ -44,48 +42,9 @@ def bt_haptics_report(samples, counter, seq=0, depth=DEFAULT_DEPTH):
     return bytes(body) + struct.pack("<I", crc)
 
 
-class PacedSender:
-    """Sends blocks at exactly the rate they play (one per FRAMES_PER_REPORT / 3 kHz).
-
-    Windows delivers the audio in 10 ms chunks, so converted blocks come in clumps;
-    measured with the IMU, clumped arrival sometimes makes the controller play a burst
-    stretched to ~2x its length, while evenly paced reports play correctly.
-    """
-    PERIOD = FRAMES_PER_REPORT / 3000
-    MAX_QUEUE = 4                       # beyond this, drop the oldest (clock drift)
-
-    def __init__(self, send):
-        self.send = send
-        self._q = deque()
-        self._cv = threading.Condition()
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def put(self, block):
-        with self._cv:
-            self._q.append(block)
-            while len(self._q) > self.MAX_QUEUE:
-                self._q.popleft()
-            self._cv.notify()
-
-    def _run(self):
-        next_t = 0.0
-        while True:
-            with self._cv:
-                idle = not self._q
-                while not self._q:
-                    self._cv.wait()
-                block = self._q.popleft()
-            now = time.perf_counter()
-            if idle:                            # stream (re)starts: send right away
-                next_t = max(next_t, now)
-            if next_t > now:
-                time.sleep(next_t - now)        # needs 1 ms timer resolution, see bridge.py
-            self.send(block)
-            next_t += self.PERIOD               # if we ran late, the next sleeps catch up
-
-
 class HapticsConverter:
-    """Feed 48 kHz (ch3, ch4) int16 frames; emits 3 kHz int8 stereo blocks via `emit`."""
+    """Feed 48 kHz (ch3, ch4) int16 frames; emits 3 kHz int8 stereo blocks via `emit`
+    (media.MediaStreamer paces them out)."""
 
     # After an effect, keep streaming silence this long before going quiet. The
     # controller only starts playing once ~80 ms of reports are queued, so a short

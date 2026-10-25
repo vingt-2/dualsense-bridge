@@ -57,7 +57,17 @@ Right-click the icon for:
   combination (e.g. *L1 + R1 + Options*), pressed one or more times (e.g. *PS ×3*) or held down
   for a while (e.g. *Options (hold 2 s)*); record it by doing it on the controller. A press
   shortcut and a hold shortcut can share the same buttons: a quick press runs one, holding runs
-  the other. Games still see the buttons, so pick something they don't use.
+  the other.
+
+  It starts with these, which you can change or delete:
+
+  | Shortcut | Does |
+  |---|---|
+  | PS | Hide mouse cursor |
+  | PS + Create | Scroll through windows (hold PS, tap Create, let go of PS to switch) |
+  | PS + Options | Cycle audio outputs, through all connected playback devices |
+  | Create + Options, held 1 s | Cycle main display, through all connected displays |
+ Games still see the buttons, so pick something they don't use.
   Actions so far:
   - **Switch audio output**: switches to one playback device.
   - **Cycle audio outputs**: tick two or more playback devices; each press goes to the next one.

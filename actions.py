@@ -43,6 +43,29 @@ class Action:
         """Held actions: the shortcut was let go."""
 
 
+def _tick_list(parent, rows, params, key, all_text):
+    """Checkboxes for rows [(id, name, label)], under an "all connected" box that, when
+    ticked, stands for whatever is connected when the shortcut runs (params {"all": True}).
+    Returns a function giving (all?, [[id, name] ticked])."""
+    chosen = {i for i, _ in params[key]} if params else set()
+    every = tk.BooleanVar(value=bool(params and params.get("all")))
+    boxes, ticks = [], []
+
+    def update():
+        for box in boxes:
+            box.configure(state="disabled" if every.get() else "normal")
+
+    ui.checkbox(parent, all_text, every, command=update).pack(fill="x")
+    for item_id, name, text in rows:
+        var = tk.BooleanVar(value=item_id in chosen)
+        box = ui.checkbox(parent, text, var, disabledforeground=MUTED)
+        box.pack(fill="x", padx=(int(20 * ui.scale), 0))
+        boxes.append(box)
+        ticks.append((item_id, name, var))
+    update()
+    return lambda: (every.get(), [[i, n] for i, n, var in ticks if var.get()])
+
+
 class _AudioOutputAction(Action):
     # The bridge doesn't carry the controller's speaker audio yet, so its sound device is silent.
     HIDDEN = ("DualSense Wireless Controller",)
@@ -67,10 +90,14 @@ class _AudioOutputAction(Action):
               wraplength=int(408 * ui.scale)).pack(fill="x", pady=(int(4 * ui.scale), 0))
 
     def run(self, params):
-        """Switch to the next connected device of params["devices"] after the current one."""
+        """Switch to the next connected device of params["devices"] (or of all of them, with
+        params["all"]) after the current one."""
         try:
             outputs = dict(audio_default.list_outputs())
-            ids = [i for i, _ in params["devices"] if i in outputs]
+            if params.get("all"):
+                ids = [i for i, _ in self._outputs()]
+            else:
+                ids = [i for i, _ in params["devices"] if i in outputs]
             if not ids:
                 raise ActionError("None of this shortcut's playback devices are connected.")
             current = audio_default.get_defaults().get((audio_default.E_RENDER, 0))
@@ -111,22 +138,19 @@ class CycleAudioOutputs(_AudioOutputAction):
     name = "Cycle audio outputs"
 
     def summary(self, params):
+        if params.get("all"):
+            return "Cycle audio output through all connected devices"
         return "Cycle audio output through " + ", ".join(n for _, n in params["devices"])
 
     def editor(self, parent, params):
-        rows = self._device_rows(params)
-        chosen = {i for i, _ in params["devices"]} if params else set()
-        ticks = []
-        for endpoint_id, name, text in rows:
-            var = tk.BooleanVar(value=endpoint_id in chosen)
-            ui.checkbox(parent, text, var).pack(fill="x")
-            ticks.append((endpoint_id, name, var))
-        if not rows:
-            label(parent, "No playback devices found.", color=MUTED, anchor="w").pack(fill="x")
-        self._hint(parent, "Each press switches to the next ticked device, in this order.")
+        ticked = _tick_list(parent, self._device_rows(params), params, "devices",
+                            "All connected playback devices")
+        self._hint(parent, "Each press switches to the next device, in this order.")
 
         def get():
-            devices = [[i, n] for i, n, var in ticks if var.get()]
+            every, devices = ticked()
+            if every:
+                return {"all": True, "devices": []}
             if len(devices) < 2:
                 raise ActionError("Tick at least two playback devices to cycle through.")
             return {"devices": devices}
@@ -138,6 +162,8 @@ class CyclePrimaryDisplay(Action):
     name = "Cycle main display"
 
     def summary(self, params):
+        if params.get("all"):
+            return "Cycle the main display through all connected displays"
         return "Cycle the main display through " + ", ".join(n for _, n in params["displays"])
 
     def editor(self, parent, params):
@@ -146,25 +172,20 @@ class CyclePrimaryDisplay(Action):
         except OSError as e:
             print(f"[display] could not list displays: {e}")
             displays = []
-        chosen = {i for i, _ in params["displays"]} if params else set()
         present = {d["id"] for d in displays}
         rows = [(d["id"], display.label(d), display.label(d)) for d in displays]
         if params:
             rows += [(i, n, f"{n} (not connected)") for i, n in params["displays"] if i not in present]
-        ticks = []
-        for display_id, name, text in rows:
-            var = tk.BooleanVar(value=display_id in chosen)
-            ui.checkbox(parent, text, var).pack(fill="x")
-            ticks.append((display_id, name, var))
-        if not rows:
-            label(parent, "No displays found.", color=MUTED, anchor="w").pack(fill="x")
-        label(parent, "Each press makes the next ticked display the main one, in this order. "
+        ticked = _tick_list(parent, rows, params, "displays", "All connected displays")
+        label(parent, "Each press makes the next display the main one, in this order. "
                       "The main display has the taskbar's clock and is where most games open.",
               size=9, color=MUTED, anchor="w", justify="left",
               wraplength=int(408 * ui.scale)).pack(fill="x", pady=(int(4 * ui.scale), 0))
 
         def get():
-            chosen = [[i, n] for i, n, var in ticks if var.get()]
+            every, chosen = ticked()
+            if every:
+                return {"all": True, "displays": []}
             if len(chosen) < 2:
                 raise ActionError("Tick at least two displays to cycle through.")
             return {"displays": chosen}
@@ -173,7 +194,10 @@ class CyclePrimaryDisplay(Action):
     def run(self, params):
         try:
             displays = {d["id"]: d for d in display.list_displays()}
-            ids = [i for i, _ in params["displays"] if i in displays]
+            if params.get("all"):
+                ids = list(displays)
+            else:
+                ids = [i for i, _ in params["displays"] if i in displays]
             if not ids:
                 raise ActionError("None of this shortcut's displays are connected.")
             current = next((i for i, d in displays.items() if d["primary"]), None)

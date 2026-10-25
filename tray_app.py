@@ -117,6 +117,19 @@ ICONS = {
 }
 
 
+# Shortcuts for a fresh install (until the user saves their own). The cycles use whatever
+# playback devices and displays are connected when they run.
+DEFAULT_SHORTCUTS = [
+    {"buttons": ["PS"], "presses": 1, "action": "hide_cursor",
+     "params": {"park": True, "show_on_move": True}},
+    {"buttons": ["Create", "PS"], "presses": 1, "action": "window_switcher", "params": {}},
+    {"buttons": ["Options", "PS"], "presses": 1, "action": "audio_cycle",
+     "params": {"all": True, "devices": []}},
+    {"buttons": ["Create", "Options"], "presses": 1, "action": "display_cycle",
+     "params": {"all": True, "displays": []}, "hold_time": 1.0},
+]
+
+
 class TrayApp:
     def __init__(self, server, bt):
         self.server, self.bt = server, bt
@@ -138,7 +151,7 @@ class TrayApp:
                  "params": {"devices": d["devices"]}} for d in settings["audio_shortcuts"]]
             settings["shortcut_notify"] = settings.get("audio_shortcut_notify", True)
             _save_settings({k: settings[k] for k in ("shortcuts", "shortcut_notify")})
-        self.shortcuts = [Shortcut.from_json(d) for d in settings.get("shortcuts", [])]
+        self.shortcuts = [Shortcut.from_json(d) for d in settings.get("shortcuts", DEFAULT_SHORTCUTS)]
         self.shortcut_notify = settings.get("shortcut_notify", True)
         self.shortcut_engine = ShortcutEngine(self._run_shortcut)
         self.shortcut_engine.set_shortcuts(self.shortcuts)

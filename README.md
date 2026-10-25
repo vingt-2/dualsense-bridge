@@ -59,6 +59,7 @@ Right-click the icon for:
   Actions so far:
   - **Switch audio output**: tick one playback device to switch to it, or several to go to the
     next one each time.
+  - **Switch window (Alt+Tab)**: goes back to the previous window; use it again to come back.
 
   New actions go in `actions.py`: one small class each.
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;

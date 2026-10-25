@@ -7,6 +7,7 @@ and the tray pick it up from there.
 import tkinter as tk
 
 import audio_default
+import keyboard
 import ui
 from ui import MUTED, label
 
@@ -90,4 +91,25 @@ class SwitchAudioOutput(Action):
         return f"Audio output: {outputs[target]}"
 
 
-ACTIONS = {a.id: a for a in [SwitchAudioOutput()]}
+class AltTab(Action):
+    id = "alt_tab"
+    name = "Switch window (Alt+Tab)"
+
+    def summary(self, params):
+        return "Switch to the previous window (Alt+Tab)"
+
+    def editor(self, parent, params):
+        label(parent, "Goes back to the window you used before, like pressing Alt+Tab once. "
+                      "Use it again to come back.", size=9, color=MUTED, anchor="w",
+              justify="left", wraplength=int(408 * ui.scale)).pack(fill="x")
+        return lambda: {}
+
+    def run(self, params):
+        try:
+            keyboard.press(keyboard.VK_MENU, keyboard.VK_TAB)
+        except OSError as e:
+            raise ActionError(f"Could not send Alt+Tab: {e}")
+        return None   # the window change is feedback enough
+
+
+ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab()]}

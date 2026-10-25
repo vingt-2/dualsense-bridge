@@ -4,6 +4,9 @@
 "PS ×3" fires on the third press of PS, each press within PRESS_GAP of the one before.
 When the same buttons have shortcuts for different press counts (PS ×1 and PS ×3), the
 smaller one waits PRESS_GAP to see whether more presses follow.
+"PS (hold 2 s)" (shortcut.hold_time) fires once PS has been held down for 2 s. If the same
+buttons also have press shortcuts, those count a press when the buttons are let go before
+then, so holding never also counts as a press.
 
 Some actions are held, like Alt while Alt+Tab-ing through windows (shortcut.hold): after
 the shortcut fires ("start"), each further press of its buttons fires "repeat" (whatever its
@@ -44,11 +47,17 @@ def decode(b0, b1, b2):
     return frozenset(held)
 
 
-def describe(buttons, presses=1):
+def describe(buttons, presses=1, hold_time=0):
     combo = " + ".join(sorted(buttons, key=BUTTONS.index))
+    if hold_time:
+        return f"{combo} (hold {hold_time:g} s)"
     if presses == 1:
         return combo
     return f"({combo}) ×{presses}" if len(buttons) > 1 else f"{combo} ×{presses}"
+
+
+def _hold_time(shortcut):
+    return getattr(shortcut, "hold_time", 0) or 0
 
 
 class ShortcutEngine:
@@ -66,6 +75,8 @@ class ShortcutEngine:
         self._lock = threading.Lock()
         self._counts = {}            # combo -> (presses so far, time of last press)
         self._timers = {}            # combo -> pending threading.Timer
+        self._holding = {}           # combo -> [token, hold shortcut fired?] while it's held
+        self._hold_timers = {}       # combo -> [threading.Timer] for its hold shortcuts
         self._recording = None       # (on_done, chords, current chord, timer)
 
     def set_shortcuts(self, shortcuts):
@@ -77,8 +88,13 @@ class ShortcutEngine:
     def _reset(self):
         for t in self._timers.values():
             t.cancel()
+        for timers in self._hold_timers.values():
+            for t in timers:
+                t.cancel()
         self._timers.clear()
         self._counts.clear()
+        self._holding.clear()
+        self._hold_timers.clear()
 
     # -- input ----------------------------------------------------------------
     def update(self, held):
@@ -93,8 +109,41 @@ class ShortcutEngine:
                 return
             combos = {frozenset(s.buttons) for s in self.shortcuts}
             for combo in combos:
-                if combo and combo <= held and not combo <= prev:
-                    self._pressed(combo)
+                if not combo:
+                    continue
+                if combo <= held and not combo <= prev:
+                    self._combo_down(combo)
+                elif combo <= prev and not combo <= held:
+                    self._combo_up(combo)
+
+    def _combo_down(self, combo):
+        holds = [s for s in self.shortcuts if frozenset(s.buttons) == combo and _hold_time(s)]
+        if not holds:
+            self._pressed(combo)
+            return
+        token = object()
+        self._holding[combo] = [token, False]
+        self._hold_timers[combo] = []
+        for shortcut in holds:
+            t = threading.Timer(_hold_time(shortcut), self._hold_reached, args=(combo, token, shortcut))
+            t.daemon = True
+            self._hold_timers[combo].append(t)
+            t.start()
+
+    def _combo_up(self, combo):
+        holding = self._holding.pop(combo, None)
+        for t in self._hold_timers.pop(combo, []):
+            t.cancel()
+        if holding and not holding[1]:   # let go before any hold time: that was a press
+            self._pressed(combo)
+
+    def _hold_reached(self, combo, token, shortcut):
+        with self._lock:
+            holding = self._holding.get(combo)
+            if not holding or holding[0] is not token or self._session or self._recording:
+                return
+            holding[1] = True
+            self._fire(shortcut)
 
     def _pressed(self, combo):
         now = time.monotonic()
@@ -102,7 +151,10 @@ class ShortcutEngine:
         count = count + 1 if now - last <= PRESS_GAP else 1
         if combo in self._timers:
             self._timers.pop(combo).cancel()
-        counts = {s.presses: s for s in self.shortcuts if frozenset(s.buttons) == combo}
+        counts = {s.presses: s for s in self.shortcuts
+                  if frozenset(s.buttons) == combo and not _hold_time(s)}
+        if not counts:
+            return
         if count >= max(counts):
             self._counts.pop(combo, None)
             if count in counts:
@@ -175,12 +227,13 @@ class ShortcutEngine:
 
     # -- recording --------------------------------------------------------------
     def record(self, on_done):
-        """Capture the next shortcut pressed on the controller; on_done(buttons, presses)
-        is called from another thread. While recording, shortcuts don't fire."""
+        """Capture the next shortcut pressed on the controller; on_done(buttons, presses,
+        held_for) is called from another thread, held_for being how long (s) the last press
+        was held. While recording, shortcuts don't fire."""
         with self._lock:
             self.cancel_record_locked()
             self._reset()
-            self._recording = [on_done, [], set(), None]
+            self._recording = [on_done, [], set(), None, 0.0, 0.0]   # ..., chord start, held for
 
     def cancel_record(self):
         with self._lock:
@@ -196,9 +249,12 @@ class ShortcutEngine:
         if rec[3]:
             rec[3].cancel()
             rec[3] = None
+        if held and not rec[2]:
+            rec[4] = time.monotonic()
         rec[2] |= held          # the chord: everything held together this press
         if held or not rec[2]:
             return
+        rec[5] = time.monotonic() - rec[4]
         rec[1].append(frozenset(rec[2]))   # all released: one press done
         rec[2] = set()
         rec[3] = threading.Timer(RECORD_IDLE, self._record_done)
@@ -213,4 +269,4 @@ class ShortcutEngine:
         chords = rec[1]
         # Repeating the same chord records a multi-press shortcut.
         presses = len(chords) if all(c == chords[-1] for c in chords) else 1
-        rec[0](chords[-1], min(presses, 5))
+        rec[0](chords[-1], min(presses, 5), rec[5])

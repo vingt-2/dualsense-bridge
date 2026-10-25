@@ -54,7 +54,7 @@ def main():
 
     # recording: the same chord repeated becomes a multi-press shortcut
     recorded = []
-    engine.record(lambda b, p: recorded.append((b, p)))
+    engine.record(lambda b, p, held_for: recorded.append((b, p)))
     for _ in range(2):
         press("L1"); press("L1", "Triangle"); press()
     time.sleep(shortcuts.RECORD_IDLE + 0.2)
@@ -82,7 +82,23 @@ def main():
     time.sleep(shortcuts.HOLD_IDLE + 0.2)
     assert phases[-1] == ("ps", "end"), phases
 
-    print("OK: shortcut decoding, combinations, multi-press, held shortcuts and recording all pass")
+    # hold-to-trigger: fires after its time, and a quicker press still counts as a press
+    fired.clear()
+    timed = ShortcutEngine(lambda sc, phase: fired.append(sc.name))
+    tap = SimpleNamespace(name="tap", buttons=["Options"], presses=1)
+    long = SimpleNamespace(name="long", buttons=["Options"], presses=1, hold_time=0.3)
+    timed.set_shortcuts([tap, long])
+    timed.update(frozenset({"Options"})); time.sleep(0.45); timed.update(frozenset())
+    time.sleep(0.1)
+    assert fired == ["long"], fired
+    fired.clear()
+    timed.update(frozenset({"Options"})); time.sleep(0.1); timed.update(frozenset())
+    time.sleep(0.4)
+    assert fired == ["tap"], fired
+    assert describe(["PS"], hold_time=2) == "PS (hold 2 s)"
+
+    print("OK: shortcut decoding, combinations, multi-press, held shortcuts, hold-to-trigger "
+          "and recording all pass")
 
 
 if __name__ == "__main__":

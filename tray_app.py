@@ -30,7 +30,7 @@ from bridge import BluetoothDualSense
 from dualsense_usb import WiredDualSense
 from actions import ACTIONS, ActionError
 from shortcut_window import Shortcut
-from shortcuts import ShortcutEngine, decode, describe
+from shortcuts import ShortcutEngine, decode
 from usbip_server import UsbIpServer
 
 APP = "DualSense Bridge"
@@ -243,7 +243,7 @@ class TrayApp:
         _save_settings({"shortcuts": [sc.to_json() for sc in shortcuts], "shortcut_notify": notify})
 
     def _run_shortcut(self, shortcut, phase):
-        name = describe(shortcut.buttons, shortcut.presses)
+        name = shortcut.trigger()
         action = ACTIONS.get(shortcut.action)
         try:
             if action is None:

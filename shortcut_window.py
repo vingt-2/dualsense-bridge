@@ -19,17 +19,26 @@ class Shortcut:
     presses: int = 1
     action: str = "audio_output"
     params: dict = field(default_factory=dict)
+    hold_time: float = 0.0   # > 0: fires once the buttons are held this long (s), see shortcuts.py
 
     def to_json(self):
-        return {"buttons": sorted(self.buttons), "presses": self.presses,
-                "action": self.action, "params": self.params}
+        d = {"buttons": sorted(self.buttons), "presses": self.presses,
+             "action": self.action, "params": self.params}
+        if self.hold_time:
+            d["hold_time"] = self.hold_time
+        return d
 
     @classmethod
     def from_json(cls, d):
         action, params = d.get("action", "audio_output"), dict(d.get("params", {}))
         if action == "audio_output" and len(params.get("devices", [])) > 1:
             action = "audio_cycle"   # "Switch" took several devices before "Cycle" existed
-        return cls(list(d.get("buttons", [])), int(d.get("presses", 1)), action, params)
+        return cls(list(d.get("buttons", [])), int(d.get("presses", 1)), action, params,
+                   float(d.get("hold_time", 0)))
+
+    def trigger(self):
+        """e.g. 'PS ×3' or 'PS (hold 2 s)'"""
+        return describe(self.buttons, self.presses, self.hold_time)
 
     @property
     def hold(self):
@@ -66,8 +75,8 @@ class ShortcutWindow:
 
         label(root, "Controller shortcuts", size=14, bold=True,
               anchor="w").pack(fill="x", padx=pad, pady=(pad, 0))
-        label(root, "Press a button combination, or press a button several times, to make "
-                    "something happen on the PC.", color=TEXT_2, anchor="w", justify="left",
+        label(root, "Press a button combination, press a button several times, or hold "
+                    "buttons down, to make something happen on the PC.", color=TEXT_2, anchor="w", justify="left",
               wraplength=int(488 * s)).pack(fill="x", padx=pad, pady=(int(4 * s), 0))
 
         self.list = tk.Frame(root, bg=SURFACE)
@@ -105,7 +114,7 @@ class ShortcutWindow:
             row.pack(fill="x", pady=(0 if i == 0 else int(6 * s), 0))
             text = tk.Frame(row, bg=PANEL)
             text.pack(side="left", fill="x", expand=True)
-            label(text, describe(sc.buttons, sc.presses), size=11, bold=True, anchor="w").pack(fill="x")
+            label(text, sc.trigger(), size=11, bold=True, anchor="w").pack(fill="x")
             label(text, sc.summary(), color=TEXT_2, anchor="w", justify="left",
                   wraplength=int(340 * s)).pack(fill="x")
             ui.button(row, "Delete", lambda sc=sc: self._delete(sc), bg=GRID).pack(side="right")
@@ -155,14 +164,22 @@ class Editor:
                                  wraplength=int(408 * s))
         self.record_note.pack(fill="x", padx=pad)
 
-        presses = tk.Frame(root, bg=SURFACE)
-        presses.pack(fill="x", padx=pad, pady=(int(8 * s), 0))
-        label(presses, "Press it", anchor="w").pack(side="left")
+        # press it N times, or hold it for N seconds
+        self.mode = tk.StringVar(value="hold" if shortcut and shortcut.hold_time else "press")
         self.presses = tk.IntVar(value=shortcut.presses if shortcut else 1)
-        tk.Spinbox(presses, from_=1, to=5, width=3, textvariable=self.presses, state="readonly",
-                   readonlybackground=PANEL, fg=TEXT, buttonbackground=PANEL, relief="flat",
-                   font=("Segoe UI", 10), command=self._show_combo).pack(side="left", padx=int(6 * s))
-        label(presses, "time(s)", anchor="w").pack(side="left")
+        self.hold_time = tk.DoubleVar(value=shortcut.hold_time if shortcut and shortcut.hold_time else 1.0)
+        for mode, text, var, spin, unit in [
+                ("press", "Press it", self.presses, dict(from_=1, to=5), "time(s)"),
+                ("hold", "Hold it for", self.hold_time,
+                 dict(from_=0.5, to=5, increment=0.5, format="%.1f"), "seconds")]:
+            row = tk.Frame(root, bg=SURFACE)
+            row.pack(fill="x", padx=pad, pady=(int(6 * s), 0))
+            ui.radio(row, text, self.mode, mode, command=self._show_combo, width=9).pack(side="left")
+            tk.Spinbox(row, width=4, textvariable=var, state="readonly", readonlybackground=PANEL,
+                       fg=TEXT, buttonbackground=PANEL, relief="flat", font=("Segoe UI", 10),
+                       command=lambda mode=mode: (self.mode.set(mode), self._show_combo()),
+                       **spin).pack(side="left", padx=int(6 * s))
+            label(row, unit, anchor="w").pack(side="left")
 
         # what it does
         what = tk.Frame(root, bg=SURFACE)
@@ -194,9 +211,15 @@ class Editor:
         if not self.buttons:
             self._record()
 
+    def _trigger(self):
+        """(presses, hold_time) as set in the editor."""
+        if self.mode.get() == "hold":
+            return 1, self.hold_time.get()
+        return self.presses.get(), 0.0
+
     def _show_combo(self):
         if self.buttons:
-            self.combo.configure(text=describe(self.buttons, self.presses.get()), fg=TEXT)
+            self.combo.configure(text=describe(self.buttons, *self._trigger()), fg=TEXT)
         else:
             self.combo.configure(text="Not set", fg=MUTED)
 
@@ -213,18 +236,25 @@ class Editor:
             self.record_note.configure(text="Turn on the controller to record a shortcut.")
             return
         self.record_btn.configure(state="disabled")
-        self.record_note.configure(text="Press the shortcut on your controller now. "
-                                        "Repeat it to make it a multi-press shortcut.")
-        self.engine.record(lambda buttons, presses: ui.call(lambda: self._recorded(buttons, presses)))
+        self.record_note.configure(text="Press the shortcut on your controller now. Repeat it "
+                                        "for a multi-press shortcut, or keep it held for a "
+                                        "hold shortcut.")
+        self.engine.record(lambda buttons, presses, held_for: ui.call(
+            lambda: self._recorded(buttons, presses, held_for)))
 
-    def _recorded(self, buttons, presses):
+    def _recorded(self, buttons, presses, held_for):
         if not self.root.winfo_exists():
             return
         self.buttons = sorted(buttons)
-        self.presses.set(presses)
+        if presses == 1 and held_for >= 0.8:   # held down: a hold shortcut, to the half second
+            self.mode.set("hold")
+            self.hold_time.set(min(5.0, max(0.5, round(held_for * 2) / 2)))
+        else:
+            self.mode.set("press")
+            self.presses.set(presses)
         self.record_btn.configure(state="normal")
         note = ""
-        if len(buttons) == 1 and presses == 1:
+        if len(buttons) == 1 and presses == 1 and self.mode.get() == "press":
             note = "A single press of one button will also trigger whenever you use it in games."
         self.record_note.configure(text=note)
         self._show_combo()
@@ -237,14 +267,15 @@ class Editor:
             params = self.get_params()
         except ActionError as e:
             return self.error.configure(text=str(e))
-        presses = self.presses.get()
+        presses, hold_time = self._trigger()
         for other in self.parent.app.shortcuts:
             if other is not self.shortcut and set(other.buttons) == set(self.buttons) \
-                    and other.presses == presses:
+                    and (other.presses, other.hold_time) == (presses, hold_time):
                 return self.error.configure(text="Another shortcut already uses "
-                                                 f"{describe(self.buttons, presses)}.")
+                                                 f"{describe(self.buttons, presses, hold_time)}.")
         action_id = self.action_ids[self.action.get()]
-        self.parent.replace(self.shortcut, Shortcut(self.buttons, presses, action_id, params))
+        self.parent.replace(self.shortcut,
+                            Shortcut(self.buttons, presses, action_id, params, hold_time))
         self._close()
 
     def _close(self):

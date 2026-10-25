@@ -54,8 +54,10 @@ Right-click the icon for:
   Gaps longer than the haptics delay can make haptics stutter.
 - **Turn off controller**: powers the controller down (press PS to turn it back on).
 - **Shortcuts…**: controller shortcuts that do things on the PC. A shortcut is a button
-  combination (e.g. *L1 + R1 + Options*), pressed one or more times (e.g. *PS ×3*); record it by
-  pressing it on the controller. Games still see the buttons, so pick something they don't use.
+  combination (e.g. *L1 + R1 + Options*), pressed one or more times (e.g. *PS ×3*) or held down
+  for a while (e.g. *Options (hold 2 s)*); record it by doing it on the controller. A press
+  shortcut and a hold shortcut can share the same buttons: a quick press runs one, holding runs
+  the other. Games still see the buttons, so pick something they don't use.
   Actions so far:
   - **Switch audio output**: switches to one playback device.
   - **Cycle audio outputs**: tick two or more playback devices; each press goes to the next one.

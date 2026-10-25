@@ -8,6 +8,7 @@ import tkinter as tk
 
 import audio_default
 import cursor
+import display
 import keyboard
 import ui
 from ui import MUTED, label
@@ -132,6 +133,57 @@ class CycleAudioOutputs(_AudioOutputAction):
         return get
 
 
+class CyclePrimaryDisplay(Action):
+    id = "display_cycle"
+    name = "Cycle main display"
+
+    def summary(self, params):
+        return "Cycle the main display through " + ", ".join(n for _, n in params["displays"])
+
+    def editor(self, parent, params):
+        try:
+            displays = display.list_displays()
+        except OSError as e:
+            print(f"[display] could not list displays: {e}")
+            displays = []
+        chosen = {i for i, _ in params["displays"]} if params else set()
+        present = {d["id"] for d in displays}
+        rows = [(d["id"], display.label(d), display.label(d)) for d in displays]
+        if params:
+            rows += [(i, n, f"{n} (not connected)") for i, n in params["displays"] if i not in present]
+        ticks = []
+        for display_id, name, text in rows:
+            var = tk.BooleanVar(value=display_id in chosen)
+            ui.checkbox(parent, text, var).pack(fill="x")
+            ticks.append((display_id, name, var))
+        if not rows:
+            label(parent, "No displays found.", color=MUTED, anchor="w").pack(fill="x")
+        label(parent, "Each press makes the next ticked display the main one, in this order. "
+                      "The main display has the taskbar's clock and is where most games open.",
+              size=9, color=MUTED, anchor="w", justify="left",
+              wraplength=int(408 * ui.scale)).pack(fill="x", pady=(int(4 * ui.scale), 0))
+
+        def get():
+            chosen = [[i, n] for i, n, var in ticks if var.get()]
+            if len(chosen) < 2:
+                raise ActionError("Tick at least two displays to cycle through.")
+            return {"displays": chosen}
+        return get
+
+    def run(self, params):
+        try:
+            displays = {d["id"]: d for d in display.list_displays()}
+            ids = [i for i, _ in params["displays"] if i in displays]
+            if not ids:
+                raise ActionError("None of this shortcut's displays are connected.")
+            current = next((i for i, d in displays.items() if d["primary"]), None)
+            target = ids[(ids.index(current) + 1) % len(ids)] if current in ids else ids[0]
+            display.set_primary(displays[target]["device"])
+        except OSError as e:
+            raise ActionError(f"Could not change the main display: {e}")
+        return f"Main display: {display.label(displays[target])}"
+
+
 class AltTab(Action):
     id = "alt_tab"
     name = "Switch window (Alt+Tab)"
@@ -214,4 +266,4 @@ class HideCursor(Action):
         return None   # the cursor vanishing is feedback enough
 
 
-ACTIONS = {a.id: a for a in [SwitchAudioOutput(), CycleAudioOutputs(), AltTab(), WindowSwitcher(), HideCursor()]}
+ACTIONS = {a.id: a for a in [SwitchAudioOutput(), CycleAudioOutputs(), CyclePrimaryDisplay(), AltTab(), WindowSwitcher(), HideCursor()]}

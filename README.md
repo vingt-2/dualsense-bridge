@@ -59,6 +59,8 @@ Right-click the icon for:
   Actions so far:
   - **Switch audio output**: switches to one playback device.
   - **Cycle audio outputs**: tick two or more playback devices; each press goes to the next one.
+  - **Cycle main display**: tick two or more displays; each press makes the next one the main
+    (primary) display, the one with the taskbar clock where most games open.
   - **Switch window (Alt+Tab)**: goes back to the previous window; use it again to come back.
   - **Scroll through windows**: like holding Alt and pressing Tab. With a combination such as
     *L1 + R1*, hold L1 and tap R1 to move through the windows, then let go of L1 to switch; with a

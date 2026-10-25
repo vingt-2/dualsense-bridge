@@ -166,7 +166,8 @@ class WindowSwitcher(Action):
                       "With a combination like L1 + R1: hold L1, tap R1 to move through the "
                       "windows, let go of L1 to switch.\n"
                       "With one button: tap it to move through the windows; it switches a "
-                      "moment after your last tap.", size=9, color=MUTED, anchor="w",
+                      "moment after your last tap.\n"
+                      "While it's open you can also pick a window with the d-pad.", size=9, color=MUTED, anchor="w",
               justify="left", wraplength=int(408 * ui.scale)).pack(fill="x")
         return lambda: {}
 

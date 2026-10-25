@@ -66,6 +66,12 @@ Right-click the icon for:
   - **Hide mouse cursor**: hides it everywhere (press again, or move the mouse, to show it), and
     can move it to the edge of the screen so it stops highlighting things in game menus.
 
+  > **Steam has its own controller shortcuts.** While Steam is running, its *Guide Button Chords*
+  > (PS held with another button, e.g. PS + Options) work everywhere, and they also fire when you
+  > use a shortcut here that includes PS. If one clashes with a shortcut you set up, remove it in
+  > Steam: *Settings → Controller → Guide Button Chord Layout → Edit*. For example, Steam's window
+  > switching doesn't let you pick a window with the d-pad, while *Scroll through windows* does.
+
   New actions go in `actions.py`: one small class each.
 - **Haptics delay**: how much haptics data the controller buffers. *Balanced (~40 ms)* is the default;
   *Low* or *Lowest* feel more immediate but may stutter when the PC or Bluetooth is busy.

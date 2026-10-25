@@ -83,7 +83,14 @@ class ShortcutWindow:
         label(root, "Games see these button presses too, so pick something a game won't "
                     "mind, like PS pressed 2 or 3 times, or a combination you don't use in "
                     "games.", size=9, color=MUTED, anchor="w", justify="left",
-              wraplength=int(488 * s)).pack(fill="x", padx=pad, pady=(int(12 * s), pad))
+              wraplength=int(488 * s)).pack(fill="x", padx=pad, pady=(int(12 * s), 0))
+        label(root, "Steam has its own PS-button shortcuts too (\"chords\", like PS + Options), "
+                    "which run as well while Steam is open. If one clashes with a shortcut here, "
+                    "remove it in Steam: Settings → Controller → Guide Button Chord Layout → "
+                    "Edit. For example, Steam's window switching doesn't let you pick a window "
+                    "with the d-pad, but \"Scroll through windows\" here does.",
+              size=9, color=MUTED, anchor="w", justify="left",
+              wraplength=int(488 * s)).pack(fill="x", padx=pad, pady=(int(8 * s), pad))
         self._refresh()
         ui.bring_to_front(root)
 

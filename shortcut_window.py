@@ -1,47 +1,44 @@
-"""Audio shortcuts window: controller shortcuts that switch Windows' playback device.
+"""Shortcuts window: controller shortcuts and what they do (see actions.py).
 
 Lives on the shared UI thread (see ui.py).
 """
 import tkinter as tk
 from dataclasses import dataclass, field
 
-import audio_default
 import ui
+from actions import ACTIONS, ActionError
 from shortcuts import describe
 from ui import GRID, MUTED, PANEL, SURFACE, TEXT, TEXT_2, label
 
 ERROR = "#d03b3b"
-# The bridge doesn't carry the controller's speaker audio yet, so its sound device is silent.
-HIDDEN_OUTPUTS = ("DualSense Wireless Controller",)
 
 
-@dataclass
-class AudioShortcut:
+@dataclass(eq=False)
+class Shortcut:
     buttons: list
     presses: int = 1
-    devices: list = field(default_factory=list)   # [(endpoint id, name)], cycled in order
+    action: str = "audio_output"
+    params: dict = field(default_factory=dict)
 
     def to_json(self):
         return {"buttons": sorted(self.buttons), "presses": self.presses,
-                "devices": [list(d) for d in self.devices]}
+                "action": self.action, "params": self.params}
 
     @classmethod
     def from_json(cls, d):
         return cls(list(d.get("buttons", [])), int(d.get("presses", 1)),
-                   [tuple(x) for x in d.get("devices", [])])
+                   d.get("action", "audio_output"), dict(d.get("params", {})))
 
-    def target_text(self):
-        names = [name for _, name in self.devices]
-        if len(names) == 1:
-            return f"Switches to {names[0]}"
-        return "Cycles through " + ", ".join(names)
+    def summary(self):
+        action = ACTIONS.get(self.action)
+        return action.summary(self.params) if action else f"Unknown action ({self.action})"
 
 
 _window = None
 
 
 def show(app):
-    """app: the tray app (audio_shortcuts, audio_notify, save_audio_shortcuts, shortcut_engine, bt)."""
+    """app: the tray app (shortcuts, shortcut_notify, save_shortcuts, shortcut_engine, bt)."""
     ui.call(lambda: _show(app))
 
 
@@ -53,26 +50,17 @@ def _show(app):
         _window = ShortcutWindow(app)
 
 
-def _outputs():
-    try:
-        return [d for d in audio_default.list_outputs()
-                if not any(h in d[1] for h in HIDDEN_OUTPUTS)]
-    except OSError as e:
-        print(f"[audio] could not list playback devices: {e}")
-        return []
-
-
 class ShortcutWindow:
     def __init__(self, app):
         self.app = app
         s = ui.scale
-        self.pad = pad = int(16 * s)
-        self.root = root = ui.window("Audio shortcuts")
+        pad = int(16 * s)
+        self.root = root = ui.window("Shortcuts")
 
-        label(root, "Switch the audio output from your controller", size=14, bold=True,
+        label(root, "Controller shortcuts", size=14, bold=True,
               anchor="w").pack(fill="x", padx=pad, pady=(pad, 0))
-        label(root, "Press a button combination, or press a button several times, to change "
-                    "Windows' playback device.", color=TEXT_2, anchor="w", justify="left",
+        label(root, "Press a button combination, or press a button several times, to make "
+                    "something happen on the PC.", color=TEXT_2, anchor="w", justify="left",
               wraplength=int(488 * s)).pack(fill="x", padx=pad, pady=(int(4 * s), 0))
 
         self.list = tk.Frame(root, bg=SURFACE)
@@ -81,8 +69,8 @@ class ShortcutWindow:
         bottom = tk.Frame(root, bg=SURFACE)
         bottom.pack(fill="x", padx=pad, pady=(int(12 * s), 0))
         ui.button(bottom, "Add shortcut…", lambda: Editor(self, None), primary=True).pack(side="left")
-        self.notify = tk.BooleanVar(value=app.audio_notify)
-        ui.checkbox(bottom, "Show a notification when it switches", self.notify,
+        self.notify = tk.BooleanVar(value=app.shortcut_notify)
+        ui.checkbox(bottom, "Show a notification when one runs", self.notify,
                     command=self._save).pack(side="right")
 
         label(root, "Games see these button presses too, so pick something a game won't "
@@ -96,30 +84,30 @@ class ShortcutWindow:
         s = ui.scale
         for w in self.list.winfo_children():
             w.destroy()
-        if not self.app.audio_shortcuts:
+        if not self.app.shortcuts:
             label(self.list, "No shortcuts yet.", color=MUTED, anchor="w").pack(fill="x")
-        for i, sc in enumerate(self.app.audio_shortcuts):
+        for i, sc in enumerate(self.app.shortcuts):
             row = tk.Frame(self.list, bg=PANEL, padx=int(12 * s), pady=int(8 * s))
             row.pack(fill="x", pady=(0 if i == 0 else int(6 * s), 0))
             text = tk.Frame(row, bg=PANEL)
             text.pack(side="left", fill="x", expand=True)
             label(text, describe(sc.buttons, sc.presses), size=11, bold=True, anchor="w").pack(fill="x")
-            label(text, sc.target_text(), color=TEXT_2, anchor="w", justify="left",
+            label(text, sc.summary(), color=TEXT_2, anchor="w", justify="left",
                   wraplength=int(340 * s)).pack(fill="x")
-            ui.button(row, "Delete", lambda i=i: self._delete(i), bg=GRID).pack(side="right")
+            ui.button(row, "Delete", lambda sc=sc: self._delete(sc), bg=GRID).pack(side="right")
             ui.button(row, "Edit…", lambda sc=sc: Editor(self, sc), bg=GRID).pack(
                 side="right", padx=(0, int(6 * s)))
 
-    def _delete(self, i):
-        del self.app.audio_shortcuts[i]
+    def _delete(self, sc):
+        self.app.shortcuts.remove(sc)
         self._save()
         self._refresh()
 
     def _save(self):
-        self.app.save_audio_shortcuts(self.app.audio_shortcuts, self.notify.get())
+        self.app.save_shortcuts(self.app.shortcuts, self.notify.get())
 
     def replace(self, old, new):
-        shortcuts = self.app.audio_shortcuts
+        shortcuts = self.app.shortcuts
         if old in shortcuts:
             shortcuts[shortcuts.index(old)] = new
         else:
@@ -141,6 +129,7 @@ class Editor:
         root.transient(parent.root)
         root.protocol("WM_DELETE_WINDOW", self._close)
 
+        # the shortcut
         label(root, "Shortcut", color=TEXT_2, anchor="w").pack(fill="x", padx=pad, pady=(pad, 0))
         rec = tk.Frame(root, bg=SURFACE)
         rec.pack(fill="x", padx=pad, pady=(int(4 * s), 0))
@@ -161,23 +150,21 @@ class Editor:
                    font=("Segoe UI", 10), command=self._show_combo).pack(side="left", padx=int(6 * s))
         label(presses, "time(s)", anchor="w").pack(side="left")
 
-        label(root, "Switch to", color=TEXT_2, anchor="w").pack(fill="x", padx=pad, pady=(int(16 * s), 0))
-        devices = tk.Frame(root, bg=SURFACE)
-        devices.pack(fill="x", padx=pad)
-        chosen = dict(shortcut.devices) if shortcut else {}
-        outputs = _outputs()
-        present = {i for i, _ in outputs}
-        self.device_vars = []
-        for endpoint_id, name in outputs + [(i, n) for i, n in chosen.items() if i not in present]:
-            var = tk.BooleanVar(value=endpoint_id in chosen)
-            text = name if endpoint_id in present else f"{name} (not connected)"
-            ui.checkbox(devices, text, var).pack(fill="x")
-            self.device_vars.append((endpoint_id, name, var))
-        if not self.device_vars:
-            label(devices, "No playback devices found.", color=MUTED, anchor="w").pack(fill="x")
-        label(root, "Tick one device to always switch to it, or several to go to the next one "
-                    "each time.", size=9, color=MUTED, anchor="w", justify="left",
-              wraplength=int(408 * s)).pack(fill="x", padx=pad, pady=(int(4 * s), 0))
+        # what it does
+        what = tk.Frame(root, bg=SURFACE)
+        what.pack(fill="x", padx=pad, pady=(int(16 * s), 0))
+        label(what, "Action", color=TEXT_2, anchor="w").pack(side="left")
+        names = {a.name: a.id for a in ACTIONS.values()}
+        current = ACTIONS.get(shortcut.action) if shortcut else None
+        self.action = tk.StringVar(value=(current or next(iter(ACTIONS.values()))).name)
+        menu = tk.OptionMenu(what, self.action, *names, command=lambda _: self._show_action())
+        menu.configure(bg=PANEL, fg=TEXT, activebackground=GRID, activeforeground=TEXT,
+                       relief="flat", highlightthickness=0, font=("Segoe UI", 10))
+        menu["menu"].configure(bg=PANEL, fg=TEXT, activebackground=ui.ACCENT, font=("Segoe UI", 10))
+        menu.pack(side="left", padx=int(8 * s))
+        self.action_ids = names
+        self.action_frame = tk.Frame(root, bg=SURFACE)
+        self.action_frame.pack(fill="x", padx=pad, pady=(int(6 * s), 0))
 
         self.error = label(root, color=ERROR, anchor="w", justify="left", wraplength=int(408 * s))
         self.error.pack(fill="x", padx=pad, pady=(int(8 * s), 0))
@@ -187,6 +174,7 @@ class Editor:
         ui.button(actions, "Cancel", self._close).pack(side="right", padx=(0, int(6 * s)))
 
         self._show_combo()
+        self._show_action()
         ui.bring_to_front(root)
         root.grab_set()
         if not self.buttons:
@@ -197,6 +185,13 @@ class Editor:
             self.combo.configure(text=describe(self.buttons, self.presses.get()), fg=TEXT)
         else:
             self.combo.configure(text="Not set", fg=MUTED)
+
+    def _show_action(self):
+        for w in self.action_frame.winfo_children():
+            w.destroy()
+        action_id = self.action_ids[self.action.get()]
+        params = self.shortcut.params if self.shortcut and self.shortcut.action == action_id else None
+        self.get_params = ACTIONS[action_id].editor(self.action_frame, params)
 
     # -- recording ------------------------------------------------------------
     def _record(self):
@@ -222,18 +217,20 @@ class Editor:
 
     # -- save -----------------------------------------------------------------
     def _save(self):
-        devices = [(i, n) for i, n, var in self.device_vars if var.get()]
         if not self.buttons:
             return self.error.configure(text="Record a shortcut first.")
-        if not devices:
-            return self.error.configure(text="Tick at least one playback device.")
+        try:
+            params = self.get_params()
+        except ActionError as e:
+            return self.error.configure(text=str(e))
         presses = self.presses.get()
-        for other in self.parent.app.audio_shortcuts:
+        for other in self.parent.app.shortcuts:
             if other is not self.shortcut and set(other.buttons) == set(self.buttons) \
                     and other.presses == presses:
                 return self.error.configure(text="Another shortcut already uses "
                                                  f"{describe(self.buttons, presses)}.")
-        self.parent.replace(self.shortcut, AudioShortcut(self.buttons, presses, devices))
+        action_id = self.action_ids[self.action.get()]
+        self.parent.replace(self.shortcut, Shortcut(self.buttons, presses, action_id, params))
         self._close()
 
     def _close(self):

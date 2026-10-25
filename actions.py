@@ -7,6 +7,7 @@ and the tray pick it up from there.
 import tkinter as tk
 
 import audio_default
+import cursor
 import keyboard
 import ui
 from ui import MUTED, label
@@ -112,4 +113,32 @@ class AltTab(Action):
         return None   # the window change is feedback enough
 
 
-ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab()]}
+class HideCursor(Action):
+    id = "hide_cursor"
+    name = "Hide mouse cursor"
+
+    def summary(self, params):
+        return "Hide or show the mouse cursor"
+
+    def editor(self, parent, params):
+        params = params or {"park": True, "show_on_move": True}
+        park = tk.BooleanVar(value=params.get("park", True))
+        show_on_move = tk.BooleanVar(value=params.get("show_on_move", True))
+        ui.checkbox(parent, "Also move it to the edge of the screen", park).pack(fill="x")
+        ui.checkbox(parent, "Show it again when the mouse moves", show_on_move).pack(fill="x")
+        label(parent, "Press the shortcut again to show it. An invisible cursor still hovers "
+                      "over things, so moving it out of the way stops it highlighting buttons "
+                      "in game menus. Games that draw their own cursor aren't affected.",
+              size=9, color=MUTED, anchor="w", justify="left",
+              wraplength=int(408 * ui.scale)).pack(fill="x", pady=(int(4 * ui.scale), 0))
+        return lambda: {"park": park.get(), "show_on_move": show_on_move.get()}
+
+    def run(self, params):
+        try:
+            hidden = cursor.toggle(params.get("park", True), params.get("show_on_move", True))
+        except OSError as e:
+            raise ActionError(f"Could not hide the cursor: {e}")
+        return "Mouse cursor hidden" if hidden else "Mouse cursor shown"
+
+
+ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab(), HideCursor()]}

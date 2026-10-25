@@ -22,6 +22,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 import audio_default
+import cursor
 import quality_window
 import shortcut_window
 from bridge import BluetoothDualSense
@@ -337,6 +338,8 @@ class TrayApp:
         with self._lock:
             self._detach()
         self._unhide_all()
+        if cursor.is_hidden():
+            cursor.restore()
         self.icon.stop()
         os._exit(0)
 
@@ -355,6 +358,7 @@ class TrayApp:
             if self.usbip is None:
                 icon.notify("usbip-win2 is required – right-click the tray icon to install it.", APP)
             self._hide_ids(self.known_ids)   # before the controller can (re)connect
+            cursor.restore()   # in case a previous run exited with the cursor hidden
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             threading.Thread(target=self.bt.run, daemon=True).start()
             threading.Thread(target=self._wait_for_quit_request, daemon=True).start()

@@ -20,6 +20,7 @@ class ActionError(Exception):
 class Action:
     id = ""
     name = ""
+    hold = False   # True: start, then repeat on each further press, then end (see shortcuts.py)
 
     def summary(self, params):
         """One line describing what this shortcut does with these params."""
@@ -33,6 +34,12 @@ class Action:
     def run(self, params):
         """Do it (on a worker thread). Returns a short message for the notification."""
         raise NotImplementedError
+
+    def repeat(self, params):
+        """Held actions: the shortcut was pressed again while held."""
+
+    def end(self, params):
+        """Held actions: the shortcut was let go."""
 
 
 class SwitchAudioOutput(Action):
@@ -113,6 +120,38 @@ class AltTab(Action):
         return None   # the window change is feedback enough
 
 
+class WindowSwitcher(Action):
+    id = "window_switcher"
+    name = "Scroll through windows (hold Alt+Tab)"
+    hold = True
+
+    def summary(self, params):
+        return "Scroll through windows, like holding Alt and pressing Tab"
+
+    def editor(self, parent, params):
+        label(parent, "Opens the Alt+Tab switcher and moves to the next window on each press.\n"
+                      "With a combination like L1 + R1: hold L1, tap R1 to move through the "
+                      "windows, let go of L1 to switch.\n"
+                      "With one button: tap it to move through the windows; it switches a "
+                      "moment after your last tap.", size=9, color=MUTED, anchor="w",
+              justify="left", wraplength=int(408 * ui.scale)).pack(fill="x")
+        return lambda: {}
+
+    def run(self, params):
+        try:
+            keyboard.key_down(keyboard.VK_MENU)
+            keyboard.press(keyboard.VK_TAB)
+        except OSError as e:
+            keyboard.release_all()
+            raise ActionError(f"Could not open the window switcher: {e}")
+
+    def repeat(self, params):
+        keyboard.press(keyboard.VK_TAB)
+
+    def end(self, params):
+        keyboard.key_up(keyboard.VK_MENU)
+
+
 class HideCursor(Action):
     id = "hide_cursor"
     name = "Hide mouse cursor"
@@ -141,4 +180,4 @@ class HideCursor(Action):
         return "Mouse cursor hidden" if hidden else "Mouse cursor shown"
 
 
-ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab(), HideCursor()]}
+ACTIONS = {a.id: a for a in [SwitchAudioOutput(), AltTab(), WindowSwitcher(), HideCursor()]}

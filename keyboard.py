@@ -42,6 +42,25 @@ def _send(*events):
         raise OSError(ctypes.get_last_error() or "SendInput was blocked")
 
 
+_down = set()   # keys we hold down right now
+
+
+def key_down(vk):
+    _send((vk, True))
+    _down.add(vk)
+
+
+def key_up(vk):
+    _down.discard(vk)
+    _send((vk, False))
+
+
+def release_all():
+    """Let go of any key still held down (e.g. Alt, if the bridge quits mid-switch)."""
+    for vk in list(_down):
+        key_up(vk)
+
+
 def press(*vks, hold=0.03):
     """Press a key combination: keys go down in order, then up in reverse."""
     _send(*[(vk, True) for vk in vks])

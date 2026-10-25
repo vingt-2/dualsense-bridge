@@ -23,6 +23,7 @@ from PIL import Image, ImageDraw
 
 import audio_default
 import cursor
+import keyboard
 import quality_window
 import shortcut_window
 from bridge import BluetoothDualSense
@@ -204,6 +205,7 @@ class TrayApp:
                 # The controller stays hidden while the bridge runs: un-hiding it here
                 # let a running game grab it on reconnect, and the game's setup
                 # (feature 0x08 over Bluetooth) knocked it off again, in a loop.
+                self.shortcut_engine.update(frozenset())   # let go of any held shortcut
                 self._detach()
                 self._set_state("waiting")
 
@@ -240,12 +242,16 @@ class TrayApp:
         self.shortcut_engine.set_shortcuts(shortcuts)
         _save_settings({"shortcuts": [sc.to_json() for sc in shortcuts], "shortcut_notify": notify})
 
-    def _run_shortcut(self, shortcut):
+    def _run_shortcut(self, shortcut, phase):
         name = describe(shortcut.buttons, shortcut.presses)
         action = ACTIONS.get(shortcut.action)
         try:
             if action is None:
                 raise ActionError(f"Unknown action {shortcut.action!r}; is DualSense Bridge up to date?")
+            if phase == "repeat":
+                return action.repeat(shortcut.params)
+            if phase == "end":
+                return action.end(shortcut.params)
             message = action.run(shortcut.params)
         except ActionError as e:
             print(f"[shortcut] {name}: {e}")
@@ -340,6 +346,7 @@ class TrayApp:
         self._unhide_all()
         if cursor.is_hidden():
             cursor.restore()
+        keyboard.release_all()
         self.icon.stop()
         os._exit(0)
 

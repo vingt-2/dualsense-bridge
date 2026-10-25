@@ -29,6 +29,11 @@ class Shortcut:
         return cls(list(d.get("buttons", [])), int(d.get("presses", 1)),
                    d.get("action", "audio_output"), dict(d.get("params", {})))
 
+    @property
+    def hold(self):
+        action = ACTIONS.get(self.action)
+        return bool(action and action.hold)
+
     def summary(self):
         action = ACTIONS.get(self.action)
         return action.summary(self.params) if action else f"Unknown action ({self.action})"

@@ -5,14 +5,23 @@
 When the same buttons have shortcuts for different press counts (PS ×1 and PS ×3), the
 smaller one waits PRESS_GAP to see whether more presses follow.
 
+Some actions are held, like Alt while Alt+Tab-ing through windows (shortcut.hold): after
+the shortcut fires ("start"), each further press of its buttons fires "repeat" (whatever its
+press count), and "end" comes once its buttons are let go. So with L1 + R1 you hold L1, tap
+R1, and let go of L1 to finish. A one-button shortcut has nothing to hold, so it ends
+HOLD_IDLE after the last press instead.
+
 Games still see the buttons, so combinations a game doesn't use (or PS pressed several
 times) work best.
 """
+import queue
 import threading
 import time
 
 PRESS_GAP = 0.4      # s allowed between presses of a multi-press shortcut
 RECORD_IDLE = 0.8    # s without presses that ends a recording
+HOLD_IDLE = 0.8      # s after the last press that ends a one-button held shortcut
+HOLD_MAX = 15.0      # s after which a held shortcut ends anyway (never leave Alt stuck)
 
 # Display order. Names match the controller's labels.
 BUTTONS = ["L1", "R1", "L2", "R2", "L3", "R3",
@@ -44,7 +53,14 @@ def describe(buttons, presses=1):
 
 class ShortcutEngine:
     def __init__(self, on_fire):
-        self.on_fire = on_fire       # called with the shortcut (any object with .buttons/.presses)
+        # on_fire(shortcut, phase): phase is "start", or "repeat"/"end" for held shortcuts.
+        # Shortcuts are any objects with .buttons and .presses (and optionally .hold).
+        # Called in order, on one worker thread: actions can take a moment (audio
+        # switching), and a held action's start/repeat/end must not overtake each other.
+        self.on_fire = on_fire
+        self._jobs = queue.Queue()
+        threading.Thread(target=self._worker, daemon=True).start()
+        self._session = None         # held shortcut in progress: [shortcut, combo, timer]
         self.shortcuts = []
         self._held = frozenset()
         self._lock = threading.Lock()
@@ -56,6 +72,7 @@ class ShortcutEngine:
         with self._lock:
             self.shortcuts = list(shortcuts)
             self._reset()
+            self._end_session()
 
     def _reset(self):
         for t in self._timers.values():
@@ -70,6 +87,9 @@ class ShortcutEngine:
             prev, self._held = self._held, held
             if self._recording:
                 self._record_update(prev, held)
+                return
+            if self._session:
+                self._session_update(prev, held)
                 return
             combos = {frozenset(s.buttons) for s in self.shortcuts}
             for combo in combos:
@@ -103,9 +123,55 @@ class ShortcutEngine:
             self._timers.pop(combo, None)
             self._fire(shortcut)
 
-    def _fire(self, shortcut):
-        # Off the Bluetooth thread: switching audio devices takes a moment.
-        threading.Thread(target=self.on_fire, args=(shortcut,), daemon=True).start()
+    def _fire(self, shortcut, phase="start"):
+        self._jobs.put((shortcut, phase))
+        if phase == "start" and getattr(shortcut, "hold", False):
+            combo = frozenset(shortcut.buttons)
+            self._session = [shortcut, combo, None]
+            self._arm_session_timer(HOLD_MAX)
+            if not combo & self._held:   # fired after its buttons were let go (press-count wait)
+                self._arm_session_timer(HOLD_IDLE)
+
+    def _worker(self):
+        while True:
+            shortcut, phase = self._jobs.get()
+            try:
+                self.on_fire(shortcut, phase)
+            except Exception as e:  # keep the worker alive whatever an action does
+                print(f"[shortcut] {type(e).__name__}: {e}")
+
+    # -- held shortcuts -----------------------------------------------------------
+    def _session_update(self, prev, held):
+        shortcut, combo, _ = self._session
+        if combo <= held and not combo <= prev:
+            self._fire(shortcut, "repeat")
+            self._arm_session_timer(HOLD_MAX)
+        elif not combo & held and combo & prev:     # all of its buttons let go
+            if len(combo) > 1:
+                self._end_session()
+            else:
+                self._arm_session_timer(HOLD_IDLE)
+
+    def _arm_session_timer(self, delay):
+        session = self._session
+        if session[2]:
+            session[2].cancel()
+        session[2] = threading.Timer(delay, self._session_timeout, args=(session,))
+        session[2].daemon = True
+        session[2].start()
+
+    def _session_timeout(self, session):
+        with self._lock:
+            if self._session is session:
+                self._end_session()
+
+    def _end_session(self):
+        if self._session:
+            shortcut, _, timer = self._session
+            if timer:
+                timer.cancel()
+            self._session = None
+            self._jobs.put((shortcut, "end"))
 
     # -- recording --------------------------------------------------------------
     def record(self, on_done):

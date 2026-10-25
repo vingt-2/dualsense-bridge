@@ -60,6 +60,9 @@ Right-click the icon for:
   - **Switch audio output**: tick one playback device to switch to it, or several to go to the
     next one each time.
   - **Switch window (Alt+Tab)**: goes back to the previous window; use it again to come back.
+  - **Scroll through windows**: like holding Alt and pressing Tab. With a combination such as
+    *L1 + R1*, hold L1 and tap R1 to move through the windows, then let go of L1 to switch; with a
+    single button, tap it to move and it switches a moment after the last tap.
   - **Hide mouse cursor**: hides it everywhere (press again, or move the mouse, to show it), and
     can move it to the edge of the screen so it stops highlighting things in game menus.
 

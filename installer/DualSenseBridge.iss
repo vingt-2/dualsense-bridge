@@ -75,6 +75,27 @@ begin
   Result := WizardSilent and (ExpandConstant('{param:LAUNCH|0}') = '1');
 end;
 
+// An update started from the app runs inside the app's job object (PyInstaller's
+// one-file launcher), so Windows kills it as soon as it closes the app. Start a copy
+// of this installer outside the job (WMI creates the process, not us) and let this
+// one end before it touches anything.
+function InitializeSetup: Boolean;
+var
+  Cmd: String;
+  ResultCode: Integer;
+begin
+  Result := True;
+  if LaunchAfterUpdate and (ExpandConstant('{param:RELAUNCHED|0}') <> '1') then
+  begin
+    Cmd := '\"' + ExpandConstant('{srcexe}') + '\" /SILENT /SUPPRESSMSGBOXES /LAUNCH=1 /RELAUNCHED=1';
+    if Exec('powershell.exe', '-NoProfile -NonInteractive -Command "if ((Invoke-CimMethod ' +
+            '-ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=''' + Cmd +
+            '''}).ReturnValue -ne 0) { exit 1 }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+       and (ResultCode = 0) then
+      Result := False;   // the copy takes over
+  end;
+end;
+
 function UsbipInstalled: Boolean;
 begin
   Result := FileExists(ExpandConstant('{commonpf64}\USBip\usbip.exe'));
@@ -153,7 +174,9 @@ begin
   Result := InstalledHidHideNow;
 end;
 
-// Upgrading: ask a running copy to quit cleanly before its exe is replaced.
+// Upgrading: ask a running copy to quit cleanly before its exe is replaced. Then end
+// whatever is left: a one-file launcher that outlived its app (seen after an update
+// started from the app) keeps the exe locked, and the silent install would give up.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Exe: String;
@@ -163,4 +186,6 @@ begin
   Exe := ExpandConstant('{app}\{#AppExe}');
   if FileExists(Exe) then
     Exec(Exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExe}', '', SW_HIDE,
+       ewWaitUntilTerminated, ResultCode);
 end;

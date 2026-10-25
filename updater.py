@@ -64,6 +64,18 @@ def download(release):
     return path
 
 
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
 def install(path):
-    """Run the installer silently; it quits this app, installs, and starts the new version."""
-    subprocess.Popen([path, "/SILENT", "/SUPPRESSMSGBOXES", "/LAUNCH=1"], close_fds=True)
+    """Run the installer silently; it quits this app, installs, and starts the new version.
+
+    The frozen app runs inside a job object (PyInstaller's one-file launcher) that kills
+    whatever it started once it exits, and the installer has to close the app. So start
+    the installer outside the job where Windows allows it; the installer also moves itself
+    out of the job when it can't (see InitializeSetup in installer/DualSenseBridge.iss)."""
+    cmd = [path, "/SILENT", "/SUPPRESSMSGBOXES", "/LAUNCH=1"]
+    try:
+        subprocess.Popen(cmd, close_fds=True, creationflags=CREATE_BREAKAWAY_FROM_JOB)
+    except OSError:
+        subprocess.Popen(cmd, close_fds=True)
